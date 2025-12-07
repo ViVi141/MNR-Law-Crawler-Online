@@ -1,0 +1,73 @@
+# MNR Law Crawler Web - Backend Dependencies
+# 版本: 3.0.0
+
+# Web框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# 数据库
+sqlalchemy>=2.0.23
+alembic>=1.12.1
+psycopg2-binary>=2.9.9  # PostgreSQL驱动
+asyncpg>=0.29.0  # 异步PostgreSQL驱动（可选）
+
+# 认证和安全
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+email-validator>=2.0.0
+
+# 配置管理
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# 任务调度
+apscheduler>=3.10.4
+
+# S3对象存储（可选）
+boto3>=1.29.0
+
+# 邮件服务（可选）
+aiosmtplib>=3.0.1
+
+# 爬虫核心依赖（复用原有）
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# 文档处理
+python-docx>=1.1.0
+pypdf>=3.0.0
+
+# 可选依赖（文档转换）
+mammoth>=1.6.0
+poword>=0.0.17
+
+# 中文分词（全文搜索）
+jieba>=0.42.1
+
+# 代理支持（可选）
+kdl>=0.2.21
+
+# 加密（配置加密）
+cryptography>=41.0.7
+
+# CORS支持
+python-jose>=3.3.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# 日志
+loguru>=0.7.2  # 可选的增强日志库
+
+# 测试（开发环境）
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+httpx>=0.25.2  # 用于测试FastAPI
+
+# 开发工具
+black>=23.11.0
+flake8>=6.1.0
+mypy>=1.7.0
+

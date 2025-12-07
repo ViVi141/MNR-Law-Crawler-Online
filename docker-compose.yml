@@ -1,0 +1,79 @@
+services:
+  # PostgreSQL数据库（自主创建，不依赖外部环境）
+  # 使用PostgreSQL 18-alpine（对应18.1版本，支持中文分词zhparser）
+  db:
+    build:
+      context: ./database
+      dockerfile: Dockerfile
+    container_name: mnr-crawler-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mnr_crawler}
+      POSTGRES_USER: ${POSTGRES_USER:-mnr_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mnr_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mnr_user} -d ${POSTGRES_DB:-mnr_crawler}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+
+  # 后端服务（自动创建数据库表、默认用户，无需额外配置）
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mnr-crawler-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-mnr_user}:${POSTGRES_PASSWORD:-mnr_password}@db:5432/${POSTGRES_DB:-mnr_crawler}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - S3_ENABLED=${S3_ENABLED:-false}
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_DIR=/app/cache
+      - STORAGE_DIR=/app/crawled_data
+    volumes:
+      - ./crawled_data:/app/crawled_data
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+      - ./backend:/app
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mnr-crawler-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    networks:
+      - default
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: mnr-crawler-network
+

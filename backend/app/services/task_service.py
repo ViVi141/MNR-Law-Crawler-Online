@@ -1,0 +1,736 @@
+"""
+任务服务 - 管理爬虫任务
+"""
+
+import logging
+import threading
+import os
+from typing import Optional, Dict, Any
+from datetime import datetime
+from sqlalchemy.orm import Session
+
+from ..models.task import Task, TaskPolicy
+from ..models.policy import Policy
+from .policy_service import PolicyService
+
+logger = logging.getLogger(__name__)
+
+
+class TaskService:
+    """任务服务"""
+    
+    def __init__(self):
+        """初始化任务服务"""
+        self.policy_service = PolicyService()
+        self._running_tasks: Dict[int, threading.Thread] = {}
+        self._crawler_instances: Dict[int, Any] = {}  # 保存爬虫实例用于停止操作
+    
+    def create_task(
+        self,
+        db: Session,
+        task_name: str,
+        task_type: str,
+        config: Dict[str, Any],
+        user_id: int
+    ) -> Task:
+        """创建任务
+        
+        Args:
+            db: 数据库会话
+            task_name: 任务名称
+            task_type: 任务类型 (crawl_task/backup_task)
+            config: 任务配置
+            user_id: 创建者ID
+            
+        Returns:
+            Task对象
+            
+        Raises:
+            ValueError: 如果爬取任务未指定数据源
+        """
+        # 验证爬取任务必须指定数据源
+        if task_type == "crawl_task":
+            data_sources = config.get("data_sources", [])
+            if not data_sources or len(data_sources) == 0:
+                raise ValueError("创建爬取任务时必须至少指定一个数据源")
+            # 验证数据源配置完整性
+            for ds in data_sources:
+                if not isinstance(ds, dict):
+                    raise ValueError(f"数据源配置格式错误: {ds}")
+                required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                missing_fields = [f for f in required_fields if f not in ds or not ds.get(f)]
+                if missing_fields:
+                    raise ValueError(f"数据源 '{ds.get('name', 'unknown')}' 缺少必需字段: {', '.join(missing_fields)}")
+        
+        task = Task(
+            task_name=task_name,
+            task_type=task_type,
+            status="pending",
+            config_json=config,
+            created_by=user_id
+        )
+        db.add(task)
+        try:
+            db.commit()
+            db.refresh(task)
+            logger.info(f"创建任务: {task.task_name} (ID: {task.id})")
+            return task
+        except Exception as e:
+            db.rollback()
+            logger.error(f"创建任务失败: {e}", exc_info=True)
+            raise
+    
+    def start_task(
+        self,
+        db: Session,
+        task_id: int,
+        background: bool = True
+    ) -> Task:
+        """启动任务
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            background: 是否在后台执行
+            
+        Returns:
+            Task对象
+        """
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+        
+        if task.status == "running":
+            raise ValueError(f"任务已在运行中: {task_id}")
+        
+        if task.status in ["completed", "cancelled"]:
+            raise ValueError(f"任务已完成或已取消: {task_id}")
+        
+        # 更新任务状态
+        task.status = "running"
+        task.start_time = datetime.now()
+        db.commit()
+        
+        if background:
+            # 在后台线程执行
+            thread = threading.Thread(
+                target=self._execute_task,
+                args=(task_id,),
+                daemon=True
+            )
+            thread.start()
+            self._running_tasks[task_id] = thread
+        else:
+            # 同步执行
+            self._execute_task(task_id)
+        
+        return task
+    
+    def stop_task(self, db: Session, task_id: int) -> bool:
+        """停止任务
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            
+        Returns:
+            是否成功停止
+        """
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            return False
+        
+        if task.status != "running":
+            return False
+        
+        # 更新任务状态
+        task.status = "cancelled"
+        task.end_time = datetime.now()
+        db.commit()
+        
+        # 停止爬虫（如果正在运行）
+        if task_id in self._crawler_instances:
+            crawler = self._crawler_instances[task_id]
+            if hasattr(crawler, 'stop_requested'):
+                crawler.stop_requested = True
+                logger.info(f"已设置爬虫停止标志: {task_id}")
+            # 不立即删除实例，让爬虫自然退出
+        
+        logger.info(f"任务已停止: {task_id}")
+        return True
+    
+    def pause_task(self, db: Session, task_id: int) -> bool:
+        """暂停任务
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            
+        Returns:
+            是否成功暂停
+        """
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            return False
+        
+        if task.status != "running":
+            return False
+        
+        # 更新任务状态为暂停
+        task.status = "paused"
+        task.end_time = datetime.now()
+        db.commit()
+        
+        # 停止爬虫（如果正在运行）
+        if task_id in self._crawler_instances:
+            crawler = self._crawler_instances[task_id]
+            if hasattr(crawler, 'stop_requested'):
+                crawler.stop_requested = True
+                logger.info(f"已设置爬虫停止标志（暂停）: {task_id}")
+        
+        logger.info(f"任务已暂停: {task_id}")
+        return True
+    
+    def resume_task(self, db: Session, task_id: int) -> bool:
+        """恢复暂停的任务
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            
+        Returns:
+            是否成功恢复
+        """
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            return False
+        
+        if task.status != "paused":
+            return False
+        
+        # 恢复任务状态为待执行，然后启动
+        task.status = "pending"
+        db.commit()
+        
+        # 启动任务
+        try:
+            self.start_task(db, task_id, background=True)
+            logger.info(f"任务已恢复: {task_id}")
+            return True
+        except Exception as e:
+            logger.error(f"恢复任务失败: {e}", exc_info=True)
+            task.status = "paused"
+            db.commit()
+            return False
+    
+    def get_task(self, db: Session, task_id: int) -> Optional[Task]:
+        """获取任务"""
+        return db.query(Task).filter(Task.id == task_id).first()
+    
+    def get_tasks(
+        self,
+        db: Session,
+        skip: int = 0,
+        limit: int = 20,
+        task_type: Optional[str] = None,
+        status: Optional[str] = None,
+        completed_only: bool = False
+    ) -> tuple:
+        """获取任务列表
+        
+        Returns:
+            (任务列表, 总数)
+        """
+        query = db.query(Task)
+        
+        if task_type:
+            query = query.filter(Task.task_type == task_type)
+        if status:
+            query = query.filter(Task.status == status)
+        
+        total = query.count()
+        tasks = query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+        
+        return tasks, total
+    
+    def _execute_task(self, task_id: int):
+        """执行任务（内部方法）"""
+        from ..database import SessionLocal
+        
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                logger.error(f"任务不存在: {task_id}")
+                return
+            
+            config = task.config_json or {}
+            
+            # 创建进度回调，将进度消息保存到数据库
+            def progress_callback(message: str):
+                logger.info(f"[任务 {task_id}] {message}")
+                try:
+                    # 更新任务进度消息（追加模式，保留最近的进度信息）
+                    task = db.query(Task).filter(Task.id == task_id).first()
+                    if task:
+                        # 保留最近的进度消息（最多保留最后100行，约5000字符）
+                        current_msg = task.progress_message or ""
+                        lines = current_msg.split('\n') if current_msg else []
+                        # 添加新消息
+                        lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+                        # 只保留最后100行
+                        if len(lines) > 100:
+                            lines = lines[-100:]
+                        task.progress_message = '\n'.join(lines)
+                        db.commit()
+                except Exception as e:
+                    logger.warning(f"保存进度消息失败: {e}")
+                    db.rollback()
+            
+            # 执行爬虫任务
+            try:
+                # 导入爬虫模块
+                from ..core.config import Config
+                from ..core.crawler import PolicyCrawler
+                
+                # 创建配置对象（会加载默认配置）
+                crawler_config = Config()
+                
+                # 从数据库读取爬虫配置（延迟等），先应用系统配置
+                from ..services.config_service import ConfigService
+                config_service = ConfigService()
+                crawler_db_config = config_service.get_crawler_config(db)
+                if crawler_db_config.get("request_delay"):
+                    crawler_config.config["request_delay"] = crawler_db_config["request_delay"]
+                if crawler_db_config.get("use_proxy") is not None:
+                    crawler_config.config["use_proxy"] = crawler_db_config["use_proxy"]
+                
+                # 处理任务配置：合并到默认配置中（而不是直接覆盖）
+                # 需要保留默认配置中的重要字段（如 output_dir、log_dir 等）
+                task_config = config.copy()
+                
+                # 如果配置中指定了data_sources，使用指定的数据源
+                if "data_sources" in task_config and task_config["data_sources"]:
+                    # 验证数据源配置完整性，确保包含所有必需字段
+                    validated_data_sources = []
+                    for ds in task_config["data_sources"]:
+                        # 确保数据源配置包含所有必需字段
+                        validated_ds = {
+                            "name": ds.get("name", ""),
+                            "base_url": ds.get("base_url", ""),
+                            "search_api": ds.get("search_api", ""),
+                            "ajax_api": ds.get("ajax_api", ds.get("search_api", "")),  # 如果没有ajax_api，使用search_api
+                            "channel_id": ds.get("channel_id", ""),
+                            "enabled": ds.get("enabled", True)
+                        }
+                        # 验证必需字段
+                        required_fields = ["name", "base_url", "search_api", "channel_id"]
+                        missing_fields = [f for f in required_fields if not validated_ds.get(f)]
+                        if missing_fields:
+                            logger.warning(f"[任务 {task_id}] 数据源 '{validated_ds.get('name')}' 缺少必需字段: {missing_fields}，跳过该数据源")
+                            continue
+                        validated_data_sources.append(validated_ds)
+                    
+                    if not validated_data_sources:
+                        raise ValueError("没有有效的数据源配置，请检查数据源配置是否完整")
+                    
+                    task_config["data_sources"] = validated_data_sources
+                    logger.info(f"[任务 {task_id}] 使用任务配置的数据源: {[ds.get('name') for ds in validated_data_sources]}")
+                else:
+                    # 使用默认配置中的数据源（启用状态的）
+                    logger.info(f"[任务 {task_id}] 使用默认配置的数据源")
+                
+                # 将任务配置合并到爬虫配置中（保留默认配置的其他字段）
+                crawler_config.config.update(task_config)
+                
+                # 检查任务状态（可能在执行前已被停止或暂停）
+                task = db.query(Task).filter(Task.id == task_id).first()
+                if not task or task.status != "running":
+                    logger.info(f"任务状态已改变，停止执行: {task_id}, status={task.status if task else 'None'}")
+                    return
+                
+                # 创建爬虫实例
+                crawler = PolicyCrawler(crawler_config, progress_callback)
+                
+                # 存储爬虫实例引用（用于停止操作）
+                self._crawler_instances[task_id] = crawler
+                
+                # 执行爬取
+                # 处理关键词：空列表或None表示全量爬取
+                keywords = config.get("keywords", [])
+                if keywords and isinstance(keywords, list):
+                    # 过滤空字符串
+                    keywords = [kw for kw in keywords if kw and kw.strip()]
+                    if not keywords:  # 如果过滤后为空，表示全量爬取
+                        keywords = None
+                elif not keywords or (isinstance(keywords, str) and not keywords.strip()):
+                    keywords = None
+                
+                # 支持 date_range 格式和 start_date/end_date 格式
+                date_range = config.get("date_range", {})
+                start_date = config.get("start_date") or (date_range.get("start") if date_range else None)
+                end_date = config.get("end_date") or (date_range.get("end") if date_range else None)
+                
+                # 清理空字符串
+                if start_date and isinstance(start_date, str) and not start_date.strip():
+                    start_date = None
+                if end_date and isinstance(end_date, str) and not end_date.strip():
+                    end_date = None
+                
+                # 记录爬取模式
+                if not keywords and not start_date and not end_date:
+                    logger.info(f"[任务 {task_id}] 全量爬取模式：无关键词、无时间范围限制")
+                    if progress_callback:
+                        progress_callback("全量爬取模式：将爬取所有政策（无关键词和时间范围限制）")
+                elif not keywords:
+                    logger.info(f"[任务 {task_id}] 全量关键词爬取模式：无关键词，时间范围: {start_date} 至 {end_date}")
+                    if progress_callback:
+                        progress_callback(f"全量关键词爬取模式：时间范围 {start_date} 至 {end_date}")
+                elif not start_date and not end_date:
+                    logger.info(f"[任务 {task_id}] 关键词爬取模式：关键词={keywords}，无时间范围限制")
+                    if progress_callback:
+                        progress_callback(f"关键词爬取模式：关键词={keywords}，无时间范围限制")
+                
+                policies = crawler.search_all_policies(
+                    keywords=keywords if keywords else None,
+                    start_date=start_date,
+                    end_date=end_date,
+                    callback=progress_callback,
+                    limit_pages=config.get("limit_pages")
+                )
+                
+                # 保存政策到数据库
+                saved_count = 0
+                skipped_count = 0
+                failed_count = 0
+                
+                # 在循环中检查停止标志
+                for policy in policies:
+                    # 检查是否请求停止
+                    if task_id in self._crawler_instances:
+                        crawler = self._crawler_instances[task_id]
+                        if hasattr(crawler, 'stop_requested') and crawler.stop_requested:
+                            logger.info(f"[任务 {task_id}] 检测到停止请求，停止处理政策")
+                            # 重新查询任务状态
+                            task = db.query(Task).filter(Task.id == task_id).first()
+                            if task and task.status == "paused":
+                                task.status = "paused"
+                            else:
+                                task.status = "cancelled"
+                            task.end_time = datetime.now()
+                            db.commit()
+                            break
+                    
+                    try:
+                        # 转换为字典
+                        if hasattr(policy, 'to_dict'):
+                            policy_data = policy.to_dict()
+                        elif isinstance(policy, dict):
+                            policy_data = policy
+                        else:
+                            policy_data = {
+                                "title": getattr(policy, 'title', ''),
+                                "pub_date": getattr(policy, 'pub_date', ''),
+                                "doc_number": getattr(policy, 'doc_number', ''),
+                                "source": getattr(policy, 'source', getattr(policy, 'url', '')),
+                                "content": getattr(policy, 'content', ''),
+                                "category": getattr(policy, 'category', ''),
+                                "level": getattr(policy, 'level', ''),
+                                "validity": getattr(policy, 'validity', ''),
+                                "effective_date": getattr(policy, 'effective_date', ''),
+                            }
+                            # 尝试获取_data_source（如果policy对象有这个属性）
+                            if hasattr(policy, '_data_source') and policy._data_source:
+                                policy_data["_data_source"] = policy._data_source
+                        
+                        # 保存政策
+                        db_policy = self.policy_service.save_policy(db, policy_data, task_id)
+                        
+                        if db_policy:
+                            # 如果爬虫生成了文件，通过storage_service保存文件并更新数据库路径
+                            from .storage_service import StorageService
+                            storage_service = StorageService()
+                            
+                            # 处理markdown文件
+                            if "markdown_path" in policy_data and policy_data["markdown_path"]:
+                                markdown_path = policy_data["markdown_path"]
+                                if os.path.exists(markdown_path):
+                                    try:
+                                        storage_result = storage_service.save_policy_file(
+                                            db_policy.id,
+                                            "markdown",
+                                            markdown_path,
+                                            content_type="text/markdown"
+                                        )
+                                        if storage_result.get("success"):
+                                            db_policy.markdown_local_path = storage_result.get("local_path")
+                                            db_policy.markdown_s3_key = storage_result.get("s3_key")
+                                            logger.debug(f"政策 {db_policy.id} 的markdown文件已保存到存储服务")
+                                    except Exception as e:
+                                        logger.warning(f"保存政策 {db_policy.id} 的markdown文件失败: {e}")
+                            
+                            # 处理docx文件
+                            if "docx_path" in policy_data and policy_data["docx_path"]:
+                                docx_path = policy_data["docx_path"]
+                                if os.path.exists(docx_path):
+                                    try:
+                                        storage_result = storage_service.save_policy_file(
+                                            db_policy.id,
+                                            "docx",
+                                            docx_path,
+                                            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                        )
+                                        if storage_result.get("success"):
+                                            db_policy.docx_local_path = storage_result.get("local_path")
+                                            db_policy.docx_s3_key = storage_result.get("s3_key")
+                                            logger.debug(f"政策 {db_policy.id} 的docx文件已保存到存储服务")
+                                    except Exception as e:
+                                        logger.warning(f"保存政策 {db_policy.id} 的docx文件失败: {e}")
+                            
+                            # 提交文件路径更新
+                            db.commit()
+                            # 创建任务-政策关联
+                            task_policy = TaskPolicy(task_id=task_id, policy_id=db_policy.id)
+                            db.add(task_policy)
+                            
+                            # 检查是否是新创建的（简单判断：爬取时间很近）
+                            # 确保时区一致：使用 timezone-aware datetime
+                            from datetime import timezone
+                            now_utc = datetime.now(timezone.utc)
+                            if db_policy.crawl_time and (now_utc - db_policy.crawl_time).total_seconds() < 10:
+                                saved_count += 1
+                                # 更新进度消息
+                                if saved_count % 10 == 0:  # 每保存10条更新一次进度
+                                    progress_callback(f"已保存 {saved_count} 条政策...")
+                            else:
+                                skipped_count += 1
+                        else:
+                            failed_count += 1
+                        
+                        # 定期更新任务统计信息（每处理20条）
+                        total_processed = saved_count + skipped_count + failed_count
+                        if total_processed > 0 and total_processed % 20 == 0:
+                            try:
+                                task = db.query(Task).filter(Task.id == task_id).first()
+                                if task:
+                                    task.policy_count = total_processed
+                                    task.success_count = saved_count
+                                    task.failed_count = failed_count
+                                    db.commit()
+                            except Exception as e:
+                                logger.warning(f"更新任务统计失败: {e}")
+                                db.rollback()
+                            
+                    except Exception as e:
+                        logger.error(f"保存政策失败: {e}", exc_info=True)
+                        failed_count += 1
+                
+                # 检查是否是因为停止请求而退出
+                task = db.query(Task).filter(Task.id == task_id).first()
+                was_stopped = False
+                if task_id in self._crawler_instances:
+                    crawler = self._crawler_instances[task_id]
+                    if hasattr(crawler, 'stop_requested') and crawler.stop_requested:
+                        was_stopped = True
+                        # 如果任务被停止，检查当前状态决定是暂停还是取消
+                        if task and task.status == "paused":
+                            task.status = "paused"
+                            task.error_message = "任务已暂停"
+                        else:
+                            task.status = "cancelled"
+                            task.error_message = "任务已取消"
+                
+                if not was_stopped:
+                    # 正常完成
+                    task.status = "completed"
+                    task.policy_count = len(policies)
+                    task.success_count = saved_count
+                    task.failed_count = failed_count + skipped_count
+                
+                task.end_time = datetime.now()
+                db.commit()
+                
+                # 清理爬虫实例引用
+                if task_id in self._crawler_instances:
+                    del self._crawler_instances[task_id]
+                
+                logger.info(f"任务完成: {task_id}, 爬取: {len(policies)}, 保存: {saved_count}, 跳过: {skipped_count}, 失败: {failed_count}")
+                
+                # 如果启用了S3，上传所有政策文件到S3并删除本地文件
+                try:
+                    from .storage_service import StorageService
+                    storage_service = StorageService()
+                    if storage_service.s3_service.is_enabled():
+                        logger.info(f"开始上传任务 {task_id} 的文件到S3...")
+                        uploaded_count = 0
+                        failed_upload_count = 0
+                        
+                        # 获取任务关联的所有政策
+                        task_policies = db.query(TaskPolicy).filter(TaskPolicy.task_id == task_id).all()
+                        policy_ids = [tp.policy_id for tp in task_policies]
+                        policies_to_upload = db.query(Policy).filter(Policy.id.in_(policy_ids)).all()
+                        
+                        # 创建政策标题到政策对象的映射（用于匹配文件）
+                        policy_map = {policy.title: policy for policy in policies_to_upload}
+                        
+                        # 扫描爬虫输出目录，查找markdown和docx文件
+                        output_dir = crawler_config.config.get("output_dir", "crawled_data")
+                        markdown_dir = os.path.join(output_dir, "markdown")
+                        docx_dir = os.path.join(output_dir, "docx")
+                        
+                        # 处理markdown文件
+                        if os.path.exists(markdown_dir):
+                            for filename in os.listdir(markdown_dir):
+                                if filename.endswith('.md'):
+                                    file_path = os.path.join(markdown_dir, filename)
+                                    # 尝试通过文件名匹配政策（文件名包含政策标题的一部分）
+                                    matched_policy = None
+                                    for title, policy in policy_map.items():
+                                        # 简化标题用于匹配
+                                        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+                                        if safe_title and safe_title in filename:
+                                            matched_policy = policy
+                                            break
+                                    
+                                    if matched_policy:
+                                        try:
+                                            s3_key = f"policies/{matched_policy.id}/{matched_policy.id}.markdown"
+                                            if storage_service.s3_service.upload_file(file_path, s3_key, content_type="text/markdown"):
+                                                matched_policy.markdown_s3_key = s3_key
+                                                # 删除本地文件
+                                                os.remove(file_path)
+                                                matched_policy.markdown_local_path = None
+                                                uploaded_count += 1
+                                                logger.debug(f"政策 {matched_policy.id} 的markdown文件已上传到S3并删除本地文件")
+                                            else:
+                                                failed_upload_count += 1
+                                        except Exception as e:
+                                            logger.warning(f"上传政策 {matched_policy.id} 的markdown文件失败: {e}")
+                                            failed_upload_count += 1
+                        
+                        # 处理docx文件
+                        if os.path.exists(docx_dir):
+                            for filename in os.listdir(docx_dir):
+                                if filename.endswith('.docx'):
+                                    file_path = os.path.join(docx_dir, filename)
+                                    # 尝试通过文件名匹配政策
+                                    matched_policy = None
+                                    for title, policy in policy_map.items():
+                                        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+                                        if safe_title and safe_title in filename:
+                                            matched_policy = policy
+                                            break
+                                    
+                                    if matched_policy:
+                                        try:
+                                            s3_key = f"policies/{matched_policy.id}/{matched_policy.id}.docx"
+                                            if storage_service.s3_service.upload_file(file_path, s3_key, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+                                                matched_policy.docx_s3_key = s3_key
+                                                # 删除本地文件
+                                                os.remove(file_path)
+                                                matched_policy.docx_local_path = None
+                                                uploaded_count += 1
+                                                logger.debug(f"政策 {matched_policy.id} 的docx文件已上传到S3并删除本地文件")
+                                            else:
+                                                failed_upload_count += 1
+                                        except Exception as e:
+                                            logger.warning(f"上传政策 {matched_policy.id} 的docx文件失败: {e}")
+                                            failed_upload_count += 1
+                        
+                        # 提交数据库更改
+                        db.commit()
+                        logger.info(f"文件上传完成: 成功 {uploaded_count} 个, 失败 {failed_upload_count} 个")
+                except Exception as e:
+                    logger.error(f"上传文件到S3失败: {e}", exc_info=True)
+                    db.rollback()
+                
+                # 发送邮件通知（如果启用且有收件人）
+                try:
+                    from .email_service import get_email_service
+                    email_service = get_email_service()
+                    if email_service.is_enabled() and email_service.to_addresses:
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(email_service.send_task_completion_notification(
+                                task_name=task.task_name,
+                                task_status="completed",
+                                policy_count=len(policies),
+                                success_count=saved_count,
+                                failed_count=failed_count + skipped_count,
+                                start_time=task.start_time,
+                                end_time=datetime.now()
+                            ))
+                        finally:
+                            loop.close()
+                except Exception as e:
+                    logger.warning(f"发送任务完成通知邮件失败: {e}")
+                
+            except Exception as e:
+                logger.error(f"任务执行失败: {e}", exc_info=True)
+                
+                # 检查是否是因为停止请求而退出
+                task = db.query(Task).filter(Task.id == task_id).first()
+                was_stopped = False
+                if task_id in self._crawler_instances:
+                    crawler = self._crawler_instances[task_id]
+                    if hasattr(crawler, 'stop_requested') and crawler.stop_requested:
+                        was_stopped = True
+                        # 如果任务被停止，检查当前状态决定是暂停还是取消
+                        if task and task.status == "paused":
+                            task.status = "paused"
+                            task.error_message = "任务已暂停"
+                        else:
+                            task.status = "cancelled"
+                            task.error_message = "任务已取消"
+                
+                if not was_stopped:
+                    task.status = "failed"
+                    task.error_message = str(e)
+                
+                task.end_time = datetime.now()
+                db.commit()
+                
+                # 清理爬虫实例引用
+                if task_id in self._crawler_instances:
+                    del self._crawler_instances[task_id]
+                
+                # 发送邮件通知（如果启用且有收件人）
+                try:
+                    from .email_service import get_email_service
+                    email_service = get_email_service()
+                    if email_service.is_enabled() and email_service.to_addresses:
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(email_service.send_task_completion_notification(
+                                task_name=task.task_name,
+                                task_status="failed",
+                                policy_count=len(policies) if 'policies' in locals() else 0,
+                                success_count=saved_count if 'saved_count' in locals() else 0,
+                                failed_count=failed_count if 'failed_count' in locals() else 0,
+                                error_message=str(e),
+                                start_time=task.start_time,
+                                end_time=datetime.now()
+                            ))
+                        finally:
+                            loop.close()
+                except Exception as email_error:
+                    logger.warning(f"发送任务失败通知邮件失败: {email_error}")
+                
+        except Exception as e:
+            logger.error(f"执行任务异常: {e}", exc_info=True)
+            # 清理爬虫实例引用
+            if task_id in self._crawler_instances:
+                del self._crawler_instances[task_id]
+        finally:
+            # 清理运行中的任务记录
+            if task_id in self._running_tasks:
+                del self._running_tasks[task_id]
+            # 确保清理爬虫实例引用
+            if task_id in self._crawler_instances:
+                del self._crawler_instances[task_id]
+            db.close()
+

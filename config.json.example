@@ -1,0 +1,53 @@
+{
+  "data_sources": [
+    {
+      "name": "政府信息公开平台",
+      "base_url": "https://gi.mnr.gov.cn/",
+      "search_api": "https://search.mnr.gov.cn/was5/web/search",
+      "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
+      "channel_id": "216640",
+      "enabled": true
+    },
+    {
+      "name": "政策法规库",
+      "base_url": "https://f.mnr.gov.cn/",
+      "search_api": "https://search.mnr.gov.cn/was5/web/search",
+      "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
+      "channel_id": "174757",
+      "enabled": false
+    }
+  ],
+  "base_url": "https://gi.mnr.gov.cn/",
+  "search_api": "https://search.mnr.gov.cn/was5/web/search",
+  "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
+  "channel_id": "216640",
+  "request_delay": 2,
+  "retry_delay": 5,
+  "max_retries": 3,
+  "rate_limit_delay": 30,
+  "session_rotate_interval": 50,
+  "timeout": 30,
+  "page_size": 20,
+  "perpage": 20,
+  "max_pages": 999999,
+  "max_empty_pages": 3,
+  "keywords": [],
+  "start_date": "",
+  "end_date": "",
+  "output_dir": "crawled_data",
+  "save_json": true,
+  "save_markdown": true,
+  "save_docx": true,
+  "save_files": true,
+  "download_docx": true,
+  "download_doc": true,
+  "download_pdf": false,
+  "download_all_files": false,
+  "use_proxy": false,
+  "kuaidaili_api_key": "",
+  "log_level": "INFO",
+  "log_file": "crawler.log",
+  "window_width": 1200,
+  "window_height": 1000,
+  "theme": "light"
+}

@@ -1,0 +1,40 @@
+<template>
+  <div id="app">
+    <router-view />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { useAuthStore } from './stores/auth'
+
+const authStore = useAuthStore()
+
+onMounted(() => {
+  // 尝试从localStorage恢复登录状态
+  const token = localStorage.getItem('token')
+  if (token) {
+    authStore.setToken(token)
+    // 验证token是否有效
+    authStore.getCurrentUser().catch(() => {
+      // token无效则清除
+      authStore.logout()
+    })
+  }
+})
+</script>
+
+<style lang="scss">
+* {
+  box-sizing: border-box;
+}
+
+#app {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+</style>
+
+

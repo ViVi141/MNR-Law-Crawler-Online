@@ -1,0 +1,63 @@
+import type { AxiosError } from 'axios'
+
+// API错误响应类型
+export interface ApiErrorResponse {
+  detail?: string
+  message?: string
+  error?: string
+}
+
+// 扩展的Axios错误类型
+export type ApiError = AxiosError<ApiErrorResponse>
+
+// 数据源配置类型
+export interface DataSourceConfig {
+  name: string
+  base_url: string
+  search_api: string
+  ajax_api: string
+  channel_id: string
+  enabled: boolean
+}
+
+// 任务配置类型
+export interface CrawlTaskConfig {
+  keywords?: string[]
+  date_range?: {
+    start?: string
+    end?: string
+  }
+  start_date?: string
+  end_date?: string
+  limit_pages?: number
+  data_sources?: DataSourceConfig[]  // 数据源配置，如果提供则使用指定的数据源
+}
+
+export interface BackupTaskConfig {
+  backup_type?: 'full' | 'incremental'
+}
+
+export type TaskConfig = CrawlTaskConfig | BackupTaskConfig | Record<string, unknown>
+
+// 任务结果类型
+export interface TaskResult {
+  success?: boolean
+  message?: string
+  policy_count?: number
+  success_count?: number
+  skipped_count?: number
+  failed_count?: number
+  error_count?: number
+  [key: string]: unknown
+}
+
+// 附件类型
+export interface Attachment {
+  id: number
+  filename: string
+  file_type: string
+  file_size: number
+  file_path: string
+  created_at: string
+}
+

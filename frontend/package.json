@@ -1,0 +1,36 @@
+{
+  "name": "mnr-law-crawler-web-frontend",
+  "version": "3.0.0",
+  "type": "module",
+  "description": "MNR Law Crawler Web - Frontend (Vue 3)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --fix"
+  },
+  "dependencies": {
+    "vue": "^3.5.25",
+    "vue-router": "^4.6.3",
+    "pinia": "^3.0.4",
+    "axios": "^1.13.2",
+    "element-plus": "^2.12.0",
+    "@element-plus/icons-vue": "^2.3.2",
+    "dayjs": "^1.11.19",
+    "echarts": "^6.0.0",
+    "vue-echarts": "^8.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.2",
+    "@vue/eslint-config-typescript": "^14.6.0",
+    "@vue/tsconfig": "^0.8.1",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.1.7",
+    "vite": "^7.2.6",
+    "eslint": "^9.39.1",
+    "eslint-plugin-vue": "^10.6.2",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "sass": "^1.94.2"
+  }
+}
