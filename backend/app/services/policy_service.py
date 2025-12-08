@@ -45,15 +45,26 @@ class PolicyService:
             effective_date = self._parse_date(policy_data.get("effective_date"))
             crawl_time = datetime.now()
             
-            # 检查政策是否已存在（基于唯一约束）
-            existing_policy = db.query(PolicyModel).filter(
-                PolicyModel.title == policy_data.get("title", ""),
-                PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                PolicyModel.pub_date == pub_date
-            ).first()
+            # 检查政策是否已存在（基于任务ID，确保每个任务的数据独立）
+            if task_id:
+                # 如果提供了task_id，检查是否存在相同的(title, source_url, pub_date, task_id)
+                existing_policy = db.query(PolicyModel).filter(
+                    PolicyModel.title == policy_data.get("title", ""),
+                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
+                    PolicyModel.pub_date == pub_date,
+                    PolicyModel.task_id == task_id
+                ).first()
+            else:
+                # 如果没有task_id，检查是否存在相同的(title, source_url, pub_date)且task_id为NULL（兼容旧数据）
+                existing_policy = db.query(PolicyModel).filter(
+                    PolicyModel.title == policy_data.get("title", ""),
+                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
+                    PolicyModel.pub_date == pub_date,
+                    PolicyModel.task_id.is_(None)
+                ).first()
             
             if existing_policy:
-                logger.debug(f"政策已存在，跳过: {existing_policy.title}")
+                logger.debug(f"政策已存在，跳过: {existing_policy.title} (Task: {task_id})")
                 return existing_policy
             
             # 计算字数
@@ -91,7 +102,7 @@ class PolicyService:
                         parsed = urlparse(source_url)
                         source_name = parsed.netloc or "未知来源"
             
-            # 创建政策记录
+            # 创建政策记录（包含task_id，确保每个任务的数据独立）
             policy = PolicyModel(
                 title=policy_data.get("title", ""),
                 doc_number=policy_data.get("doc_number", ""),
@@ -109,7 +120,8 @@ class PolicyService:
                 keywords=keywords_str,
                 word_count=word_count,
                 crawl_time=crawl_time,
-                is_indexed=False
+                is_indexed=False,
+                task_id=task_id  # 添加task_id，确保每个任务的数据独立
             )
             
             # 保存文件路径信息（如果有）
@@ -147,6 +159,9 @@ class PolicyService:
                     db.add(attachment)
                 policy.attachment_count = len(attachments)
             
+            # 标记为已索引（PostgreSQL会自动维护GIN索引）
+            policy.is_indexed = True
+            
             db.commit()
             db.refresh(policy)
             
@@ -155,13 +170,22 @@ class PolicyService:
             
         except IntegrityError:
             db.rollback()
-            logger.warning(f"政策已存在（唯一约束冲突）: {policy_data.get('title', 'Unknown')}")
-            # 尝试查找并返回现有政策
-            existing_policy = db.query(PolicyModel).filter(
-                PolicyModel.title == policy_data.get("title", ""),
-                PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                PolicyModel.pub_date == pub_date
-            ).first()
+            logger.warning(f"政策已存在（唯一约束冲突）: {policy_data.get('title', 'Unknown')} (Task: {task_id})")
+            # 尝试查找并返回现有政策（基于task_id）
+            if task_id:
+                existing_policy = db.query(PolicyModel).filter(
+                    PolicyModel.title == policy_data.get("title", ""),
+                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
+                    PolicyModel.pub_date == pub_date,
+                    PolicyModel.task_id == task_id
+                ).first()
+            else:
+                existing_policy = db.query(PolicyModel).filter(
+                    PolicyModel.title == policy_data.get("title", ""),
+                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
+                    PolicyModel.pub_date == pub_date,
+                    PolicyModel.task_id.is_(None)
+                ).first()
             return existing_policy
             
         except Exception as e:
@@ -236,13 +260,9 @@ class PolicyService:
         Returns:
             (政策列表, 总数)
         """
-        from ..models.task import TaskPolicy
-        
-        # 如果指定了task_id，需要通过TaskPolicy关联表进行筛选
+        # 如果指定了task_id，直接通过policy.task_id筛选（更高效）
         if task_id:
-            query = db.query(PolicyModel).join(
-                TaskPolicy, PolicyModel.id == TaskPolicy.policy_id
-            ).filter(TaskPolicy.task_id == task_id)
+            query = db.query(PolicyModel).filter(PolicyModel.task_id == task_id)
         else:
             query = db.query(PolicyModel)
         
@@ -269,9 +289,7 @@ class PolicyService:
                 (PolicyModel.keywords.ilike(keyword_pattern))
             )
         
-        # 如果指定了task_id，需要去重（因为可能有多对多关系）
-        if task_id:
-            query = query.distinct()
+        # 由于policy.task_id直接关联任务，不需要去重
         
         # 获取总数
         total = query.count()

@@ -2,7 +2,7 @@
 政策模型
 """
 
-from sqlalchemy import Column, BigInteger, Integer, String, Text, Date, Boolean, DateTime, Index
+from sqlalchemy import Column, BigInteger, Integer, String, Text, Date, Boolean, DateTime, Index, ForeignKey
 from sqlalchemy.sql import func
 from ..database import Base
 
@@ -66,9 +66,16 @@ class Policy(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
+    # 任务关联（新增：每个任务的数据独立）
+    task_id = Column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    
     # 唯一约束
+    # 注意：PostgreSQL不支持部分唯一索引，所以使用应用层逻辑检查唯一性
+    # 对于task_id不为NULL的情况：(title, source_url, pub_date, task_id)唯一
+    # 对于task_id为NULL的情况：(title, source_url, pub_date)唯一（兼容旧数据）
     __table_args__ = (
-        Index('idx_policy_unique', 'title', 'source_url', 'pub_date', unique=True),
+        Index('idx_policy_unique', 'title', 'source_url', 'pub_date'),
+        Index('idx_policy_task', 'task_id'),
         # 注意：全文搜索应该使用PostgreSQL的GIN索引和tsvector，而不是普通的btree索引
         # 这里只对title建立索引，content字段太大无法用btree索引
         # 全文搜索功能在search_service中使用tsvector实现

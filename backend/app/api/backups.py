@@ -53,6 +53,8 @@ def get_backups(
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
     backup_type: Optional[str] = Query(None, description="备份类型筛选"),
     status_filter: Optional[str] = Query(None, alias="status", description="状态筛选"),
+    source_type: Optional[str] = Query(None, description="来源类型筛选 (manual/task/scheduled)"),
+    source_deleted: Optional[bool] = Query(None, description="来源是否已删除筛选"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -63,7 +65,9 @@ def get_backups(
             skip=skip,
             limit=limit,
             backup_type=backup_type,
-            status=status_filter
+            status=status_filter,
+            source_type=source_type,
+            source_deleted=source_deleted
         )
         return BackupRecordListResponse(
             items=[BackupRecordResponse.model_validate(record) for record in records],
@@ -126,6 +130,87 @@ def restore_backup(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"恢复备份失败: {str(e)}"
+        )
+
+
+@router.get("/{backup_id}/download")
+def download_backup(
+    backup_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """下载备份文件"""
+    try:
+        backup_record = backup_service.get_backup_record(db, backup_id)
+        if not backup_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="备份记录不存在"
+            )
+        
+        if backup_record.status != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="备份未完成，无法下载"
+            )
+        
+        # 获取备份文件路径
+        from pathlib import Path
+        import os
+        from fastapi.responses import FileResponse
+        
+        backup_path = None
+        if backup_record.local_path and Path(backup_record.local_path).exists():
+            backup_path = backup_record.local_path
+        elif backup_record.s3_key:
+            # 从S3下载到临时文件
+            from ..services.s3_service import S3Service
+            s3_service = S3Service()
+            if s3_service.is_enabled():
+                import tempfile
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
+                temp_path = temp_file.name
+                temp_file.close()
+                if s3_service.download_file(backup_record.s3_key, temp_path):
+                    backup_path = temp_path
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="从S3下载备份文件失败"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="备份文件不存在"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="备份文件不存在"
+            )
+        
+        if not backup_path or not os.path.exists(backup_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="备份文件不存在"
+            )
+        
+        # 生成下载文件名
+        backup_name = backup_record.source_name or backup_record.id
+        filename = f"{backup_name}_{backup_record.backup_type}_{backup_record.start_time.strftime('%Y%m%d_%H%M%S')}.sql"
+        
+        return FileResponse(
+            backup_path,
+            media_type="application/sql",
+            filename=filename
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载备份失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下载备份失败: {str(e)}"
         )
 
 

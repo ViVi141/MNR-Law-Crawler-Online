@@ -2,12 +2,10 @@
 存储服务抽象（整合本地存储和S3）
 """
 
-import os
 import shutil
 import logging
 from pathlib import Path
 from typing import Optional, List
-from .s3_service import S3Service
 from .cache_service import CacheService
 from ..config import settings
 
@@ -36,7 +34,8 @@ class StorageService:
         policy_id: int,
         file_type: str,
         source_path: str,
-        content_type: Optional[str] = None
+        content_type: Optional[str] = None,
+        task_id: Optional[int] = None
     ) -> dict:
         """保存政策文件（到本地和/或S3）"""
         result = {
@@ -47,12 +46,22 @@ class StorageService:
         }
         
         try:
+            # 将文件类型转换为实际扩展名
+            file_ext = "md" if file_type == "markdown" else file_type
             # 确定文件名
-            file_name = f"{policy_id}.{file_type}"
+            file_name = f"{policy_id}.{file_ext}"
+            
+            # 文件路径包含task_id（如果提供），确保每个任务的文件独立
+            if task_id:
+                # 路径格式：policies/{task_id}/{policy_id}/{policy_id}.md
+                file_dir = f"{task_id}/{policy_id}"
+            else:
+                # 兼容旧数据：policies/{policy_id}/{policy_id}.md
+                file_dir = str(policy_id)
             
             # 1. 保存到本地存储（如果使用本地模式）
             if self.storage_mode == "local":
-                local_path = self.local_dir / "policies" / str(policy_id) / file_name
+                local_path = self.local_dir / "policies" / file_dir / file_name
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source_path, local_path)
                 result["local_path"] = str(local_path)
@@ -60,7 +69,7 @@ class StorageService:
             
             # 2. 上传到S3（如果启用S3）
             if self.s3_service.is_enabled():
-                s3_key = f"policies/{policy_id}/{file_name}"
+                s3_key = f"policies/{file_dir}/{file_name}"
                 if self.s3_service.upload_file(source_path, s3_key, content_type):
                     result["s3_key"] = s3_key
                     logger.debug(f"文件上传到S3: {s3_key}")
@@ -83,7 +92,8 @@ class StorageService:
     def get_policy_file_path(
         self,
         policy_id: int,
-        file_type: str
+        file_type: str,
+        task_id: Optional[int] = None
     ) -> Optional[str]:
         """获取政策文件路径（优先缓存，然后本地，最后从S3下载）"""
         # 1. 检查缓存
@@ -91,9 +101,18 @@ class StorageService:
         if cache_path:
             return str(cache_path)
         
+        # 将文件类型转换为实际扩展名
+        file_ext = "md" if file_type == "markdown" else file_type
+        
+        # 文件路径包含task_id（如果提供）
+        if task_id:
+            file_dir = f"{task_id}/{policy_id}"
+        else:
+            file_dir = str(policy_id)
+        
         # 2. 检查本地存储
         if self.storage_mode == "local":
-            local_path = self.local_dir / "policies" / str(policy_id) / f"{policy_id}.{file_type}"
+            local_path = self.local_dir / "policies" / file_dir / f"{policy_id}.{file_ext}"
             if local_path.exists():
                 # 更新缓存
                 if self.cache_service.is_enabled():
@@ -102,7 +121,7 @@ class StorageService:
         
         # 3. 从S3下载（如果启用S3）
         if self.s3_service.is_enabled():
-            s3_key = f"policies/{policy_id}/{policy_id}.{file_type}"
+            s3_key = f"policies/{file_dir}/{policy_id}.{file_ext}"
             
             # 下载到缓存
             if self.cache_service.is_enabled():
@@ -127,30 +146,49 @@ class StorageService:
         self,
         policy_id: int,
         file_type: str,
-        expiration: int = 3600
+        expiration: int = 3600,
+        task_id: Optional[int] = None
     ) -> Optional[str]:
         """获取政策文件URL（用于直接访问）"""
+        # 将文件类型转换为实际扩展名
+        file_ext = "md" if file_type == "markdown" else file_type
+        
+        # 文件路径包含task_id（如果提供）
+        if task_id:
+            file_dir = f"{task_id}/{policy_id}"
+        else:
+            file_dir = str(policy_id)
+        
         # 如果使用S3，生成预签名URL
         if self.s3_service.is_enabled():
-            s3_key = f"policies/{policy_id}/{policy_id}.{file_type}"
+            s3_key = f"policies/{file_dir}/{policy_id}.{file_ext}"
             return self.s3_service.get_presigned_url(s3_key, expiration)
         
         # 本地存储返回相对路径（需要前端处理）
         if self.storage_mode == "local":
-            local_path = self.local_dir / "policies" / str(policy_id) / f"{policy_id}.{file_type}"
+            local_path = self.local_dir / "policies" / file_dir / f"{policy_id}.{file_ext}"
             if local_path.exists():
                 # 返回API端点路径
                 return f"/api/files/policies/{policy_id}/{file_type}"
         
         return None
     
-    def delete_policy_file(self, policy_id: int, file_type: str) -> bool:
+    def delete_policy_file(self, policy_id: int, file_type: str, task_id: Optional[int] = None) -> bool:
         """删除政策文件"""
         success = True
         
+        # 将文件类型转换为实际扩展名
+        file_ext = "md" if file_type == "markdown" else file_type
+        
+        # 文件路径包含task_id（如果提供）
+        if task_id:
+            file_dir = f"{task_id}/{policy_id}"
+        else:
+            file_dir = str(policy_id)
+        
         # 1. 删除本地文件
         if self.storage_mode == "local":
-            local_path = self.local_dir / "policies" / str(policy_id) / f"{policy_id}.{file_type}"
+            local_path = self.local_dir / "policies" / file_dir / f"{policy_id}.{file_ext}"
             if local_path.exists():
                 try:
                     local_path.unlink()
@@ -160,7 +198,7 @@ class StorageService:
         
         # 2. 删除S3文件
         if self.s3_service.is_enabled():
-            s3_key = f"policies/{policy_id}/{policy_id}.{file_type}"
+            s3_key = f"policies/{file_dir}/{policy_id}.{file_ext}"
             if not self.s3_service.delete_file(s3_key):
                 success = False
         
@@ -175,19 +213,26 @@ class StorageService:
         
         return success
     
-    def cleanup_policy_files(self, policy_id: int) -> bool:
+    def cleanup_policy_files(self, policy_id: int, task_id: Optional[int] = None) -> bool:
         """清理政策的所有文件（包括所有类型文件和附件）"""
         success = True
         
         # 1. 删除所有类型的文件
-        file_types = ['json', 'markdown', 'docx']
+        file_types = ['markdown', 'docx']
         for file_type in file_types:
-            if not self.delete_policy_file(policy_id, file_type):
+            if not self.delete_policy_file(policy_id, file_type, task_id=task_id):
                 success = False
         
         # 2. 删除附件目录
         if self.storage_mode == "local":
-            attachments_dir = self.local_dir / "policies" / str(policy_id) / "attachments"
+            # 附件路径包含task_id（如果提供）
+            if task_id:
+                attachments_dir = self.local_dir / "policies" / str(task_id) / str(policy_id) / "attachments"
+                policy_dir = self.local_dir / "policies" / str(task_id) / str(policy_id)
+            else:
+                attachments_dir = self.local_dir / "policies" / str(policy_id) / "attachments"
+                policy_dir = self.local_dir / "policies" / str(policy_id)
+            
             if attachments_dir.exists():
                 try:
                     shutil.rmtree(attachments_dir)
@@ -196,7 +241,6 @@ class StorageService:
                     success = False
             
             # 删除政策目录（如果为空）
-            policy_dir = self.local_dir / "policies" / str(policy_id)
             if policy_dir.exists():
                 try:
                     # 检查目录是否为空
@@ -207,7 +251,11 @@ class StorageService:
         
         # 3. 删除S3中的附件
         if self.s3_service.is_enabled():
-            prefix = f"policies/{policy_id}/attachments/"
+            # S3路径包含task_id（如果提供）
+            if task_id:
+                prefix = f"policies/{task_id}/{policy_id}/attachments/"
+            else:
+                prefix = f"policies/{policy_id}/attachments/"
             s3_files = self.s3_service.list_files(prefix)
             for s3_key in s3_files:
                 if not self.s3_service.delete_file(s3_key):
@@ -219,7 +267,8 @@ class StorageService:
         self,
         policy_id: int,
         attachment_filename: str,
-        source_path: str
+        source_path: str,
+        task_id: Optional[int] = None
     ) -> dict:
         """保存附件"""
         result = {
@@ -229,16 +278,22 @@ class StorageService:
         }
         
         try:
+            # 附件路径包含task_id（如果提供），确保每个任务的附件独立
+            if task_id:
+                file_dir = f"{task_id}/{policy_id}"
+            else:
+                file_dir = str(policy_id)
+            
             # 1. 保存到本地存储
             if self.storage_mode == "local":
-                local_path = self.local_dir / "policies" / str(policy_id) / "attachments" / attachment_filename
+                local_path = self.local_dir / "policies" / file_dir / "attachments" / attachment_filename
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source_path, local_path)
                 result["local_path"] = str(local_path)
             
             # 2. 上传到S3
             if self.s3_service.is_enabled():
-                s3_key = f"policies/{policy_id}/attachments/{attachment_filename}"
+                s3_key = f"policies/{file_dir}/attachments/{attachment_filename}"
                 if self.s3_service.upload_file(source_path, s3_key):
                     result["s3_key"] = s3_key
             
@@ -251,19 +306,75 @@ class StorageService:
             result["error"] = str(e)
             return result
     
-    def list_attachments(self, policy_id: int) -> List[str]:
+    def get_attachment_file_path(
+        self,
+        policy_id: int,
+        attachment_filename: str,
+        task_id: Optional[int] = None
+    ) -> Optional[str]:
+        """获取附件文件路径（优先缓存，然后本地，最后从S3下载）"""
+        # 1. 检查缓存
+        cache_path = self.cache_service.get_attachment_file(policy_id, attachment_filename)
+        if cache_path:
+            return str(cache_path)
+        
+        # 附件路径包含task_id（如果提供）
+        if task_id:
+            file_dir = f"{task_id}/{policy_id}"
+        else:
+            file_dir = str(policy_id)
+        
+        # 2. 检查本地存储
+        if self.storage_mode == "local":
+            local_path = self.local_dir / "policies" / file_dir / "attachments" / attachment_filename
+            if local_path.exists():
+                # 更新缓存
+                if self.cache_service.is_enabled():
+                    self.cache_service.cache_attachment_file(policy_id, attachment_filename, str(local_path))
+                return str(local_path)
+        
+        # 3. 从S3下载（如果启用S3）
+        if self.s3_service.is_enabled():
+            s3_key = f"policies/{file_dir}/attachments/{attachment_filename}"
+            
+            # 下载到缓存
+            if self.cache_service.is_enabled():
+                cache_path = self.cache_service.get_attachment_cache_path(policy_id, attachment_filename)
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if self.s3_service.download_file(s3_key, str(cache_path)):
+                    return str(cache_path)
+            else:
+                # 下载到临时目录
+                import tempfile
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{attachment_filename}")
+                temp_path = temp_file.name
+                temp_file.close()
+                
+                if self.s3_service.download_file(s3_key, temp_path):
+                    return temp_path
+        
+        return None
+    
+    def list_attachments(self, policy_id: int, task_id: Optional[int] = None) -> List[str]:
         """列出政策的所有附件"""
         attachments = []
         
+        # 附件路径包含task_id（如果提供）
+        if task_id:
+            file_dir = f"{task_id}/{policy_id}"
+        else:
+            file_dir = str(policy_id)
+        
         # 从本地存储列出
         if self.storage_mode == "local":
-            attachments_dir = self.local_dir / "policies" / str(policy_id) / "attachments"
+            attachments_dir = self.local_dir / "policies" / file_dir / "attachments"
             if attachments_dir.exists():
                 attachments.extend([f.name for f in attachments_dir.iterdir() if f.is_file()])
         
         # 从S3列出
         if self.s3_service.is_enabled():
-            prefix = f"policies/{policy_id}/attachments/"
+            prefix = f"policies/{file_dir}/attachments/"
             s3_files = self.s3_service.list_files(prefix)
             for s3_key in s3_files:
                 filename = s3_key.split("/")[-1]

@@ -24,6 +24,7 @@ class TaskService:
         self.policy_service = PolicyService()
         self._running_tasks: Dict[int, threading.Thread] = {}
         self._crawler_instances: Dict[int, Any] = {}  # 保存爬虫实例用于停止操作
+        self._crawler_lock = threading.Lock()  # 线程安全锁
     
     def create_task(
         self,
@@ -148,10 +149,10 @@ class TaskService:
         task.end_time = datetime.now()
         db.commit()
         
-        # 停止爬虫（如果正在运行）
-        if task_id in self._crawler_instances:
-            crawler = self._crawler_instances[task_id]
-            if hasattr(crawler, 'stop_requested'):
+        # 停止爬虫（如果正在运行）- 线程安全
+        with self._crawler_lock:
+            crawler = self._crawler_instances.get(task_id)
+            if crawler and hasattr(crawler, 'stop_requested'):
                 crawler.stop_requested = True
                 logger.info(f"已设置爬虫停止标志: {task_id}")
             # 不立即删除实例，让爬虫自然退出
@@ -181,10 +182,10 @@ class TaskService:
         task.end_time = datetime.now()
         db.commit()
         
-        # 停止爬虫（如果正在运行）
-        if task_id in self._crawler_instances:
-            crawler = self._crawler_instances[task_id]
-            if hasattr(crawler, 'stop_requested'):
+        # 停止爬虫（如果正在运行）- 线程安全
+        with self._crawler_lock:
+            crawler = self._crawler_instances.get(task_id)
+            if crawler and hasattr(crawler, 'stop_requested'):
                 crawler.stop_requested = True
                 logger.info(f"已设置爬虫停止标志（暂停）: {task_id}")
         
@@ -226,6 +227,108 @@ class TaskService:
     def get_task(self, db: Session, task_id: int) -> Optional[Task]:
         """获取任务"""
         return db.query(Task).filter(Task.id == task_id).first()
+    
+    def delete_task(self, db: Session, task_id: int) -> bool:
+        """删除任务（包括关联的数据和文件）
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            
+        Returns:
+            是否成功删除
+            
+        Raises:
+            ValueError: 如果任务不存在或正在运行
+        """
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            raise ValueError(f"任务不存在: {task_id}")
+        
+        # 检查任务状态，如果正在运行，不允许删除
+        if task.status == "running":
+            raise ValueError("无法删除正在运行的任务，请先停止任务")
+        
+        # 1. 查找任务关联的所有政策（通过task_id直接查找，更高效）
+        policies = db.query(Policy).filter(
+            Policy.task_id == task_id
+        ).all()
+        
+        deleted_policies_count = 0
+        deleted_files_count = 0
+        
+        # 2. 对每个政策进行处理（因为policy.task_id == task_id，这些政策只属于该任务）
+        from .storage_service import StorageService
+        storage_service = StorageService()
+        
+        for policy in policies:
+            policy_id = policy.id
+            
+            # 删除政策的所有文件（文件路径包含task_id，确保独立）
+            file_types = ['markdown', 'docx']
+            for file_type in file_types:
+                try:
+                    if storage_service.delete_policy_file(policy_id, file_type, task_id=task_id):
+                        deleted_files_count += 1
+                except Exception as e:
+                    logger.warning(f"删除政策 {policy_id} 的 {file_type} 文件失败: {e}")
+            
+            # 删除附件
+            from ..models.attachment import Attachment
+            attachments = db.query(Attachment).filter(
+                Attachment.policy_id == policy_id
+            ).all()
+            for attachment in attachments:
+                # 删除附件文件
+                if attachment.file_path and os.path.exists(attachment.file_path):
+                    try:
+                        os.remove(attachment.file_path)
+                        deleted_files_count += 1
+                    except Exception as e:
+                        logger.warning(f"删除附件文件失败: {attachment.file_path} - {e}")
+                # 删除S3附件（如果有）
+                if attachment.file_s3_key and storage_service.s3_service.is_enabled():
+                    try:
+                        storage_service.s3_service.delete_file(attachment.file_s3_key)
+                    except Exception as e:
+                        logger.warning(f"删除S3附件失败: {attachment.file_s3_key} - {e}")
+                # 删除附件记录
+                db.delete(attachment)
+            
+            # 删除政策记录
+            db.delete(policy)
+            deleted_policies_count += 1
+        
+        # 3. 删除TaskPolicy关联记录（虽然policy.task_id已经关联，但为了数据一致性，也删除关联记录）
+        task_policies = db.query(TaskPolicy).filter(
+            TaskPolicy.task_id == task_id
+        ).all()
+        for task_policy in task_policies:
+            db.delete(task_policy)
+        
+        # 4. 更新关联的备份记录（不删除备份）
+        from ..models.system_config import BackupRecord
+        backups = db.query(BackupRecord).filter(
+            BackupRecord.source_type == "task",
+            BackupRecord.source_id == str(task_id)
+        ).all()
+        
+        for backup in backups:
+            backup.source_deleted = True
+            # 如果还没有保存任务名称，现在保存
+            if not backup.source_name:
+                backup.source_name = task.task_name
+        
+        # 5. 删除任务记录
+        db.delete(task)
+        db.commit()
+        
+        logger.info(
+            f"已删除任务: {task.task_name} (ID: {task_id}), "
+            f"删除了 {deleted_policies_count} 个政策, {deleted_files_count} 个文件, "
+            f"更新了 {len(backups)} 个备份记录（备份已保留）"
+        )
+        return True
     
     def get_tasks(
         self,
@@ -276,12 +379,20 @@ class TaskService:
                         # 保留最近的进度消息（最多保留最后100行，约5000字符）
                         current_msg = task.progress_message or ""
                         lines = current_msg.split('\n') if current_msg else []
+                        # 限制单行消息长度
+                        max_line_length = 500
+                        if len(message) > max_line_length:
+                            message = message[:max_line_length] + "..."
                         # 添加新消息
                         lines.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
                         # 只保留最后100行
                         if len(lines) > 100:
                             lines = lines[-100:]
+                        # 限制总长度
+                        max_total_length = 10000
                         task.progress_message = '\n'.join(lines)
+                        if len(task.progress_message) > max_total_length:
+                            task.progress_message = task.progress_message[-max_total_length:]
                         db.commit()
                 except Exception as e:
                     logger.warning(f"保存进度消息失败: {e}")
@@ -352,8 +463,9 @@ class TaskService:
                 # 创建爬虫实例
                 crawler = PolicyCrawler(crawler_config, progress_callback)
                 
-                # 存储爬虫实例引用（用于停止操作）
-                self._crawler_instances[task_id] = crawler
+                # 存储爬虫实例引用（用于停止操作）- 线程安全
+                with self._crawler_lock:
+                    self._crawler_instances[task_id] = crawler
                 
                 # 执行爬取
                 # 处理关键词：空列表或None表示全量爬取
@@ -404,12 +516,15 @@ class TaskService:
                 skipped_count = 0
                 failed_count = 0
                 
+                # 记录已保存文件的原始路径，用于后续清理
+                saved_file_paths = set()
+                
                 # 在循环中检查停止标志
                 for policy in policies:
-                    # 检查是否请求停止
-                    if task_id in self._crawler_instances:
-                        crawler = self._crawler_instances[task_id]
-                        if hasattr(crawler, 'stop_requested') and crawler.stop_requested:
+                    # 检查是否请求停止 - 线程安全
+                    with self._crawler_lock:
+                        crawler = self._crawler_instances.get(task_id)
+                        if crawler and hasattr(crawler, 'stop_requested') and crawler.stop_requested:
                             logger.info(f"[任务 {task_id}] 检测到停止请求，停止处理政策")
                             # 重新查询任务状态
                             task = db.query(Task).filter(Task.id == task_id).first()
@@ -443,7 +558,7 @@ class TaskService:
                             if hasattr(policy, '_data_source') and policy._data_source:
                                 policy_data["_data_source"] = policy._data_source
                         
-                        # 保存政策
+                        # 保存政策（传入task_id，确保每个任务的数据独立）
                         db_policy = self.policy_service.save_policy(db, policy_data, task_id)
                         
                         if db_policy:
@@ -451,7 +566,7 @@ class TaskService:
                             from .storage_service import StorageService
                             storage_service = StorageService()
                             
-                            # 处理markdown文件
+                            # 处理markdown文件（确保文件已保存到存储服务）
                             if "markdown_path" in policy_data and policy_data["markdown_path"]:
                                 markdown_path = policy_data["markdown_path"]
                                 if os.path.exists(markdown_path):
@@ -460,16 +575,35 @@ class TaskService:
                                             db_policy.id,
                                             "markdown",
                                             markdown_path,
-                                            content_type="text/markdown"
+                                            content_type="text/markdown",
+                                            task_id=task_id
                                         )
                                         if storage_result.get("success"):
-                                            db_policy.markdown_local_path = storage_result.get("local_path")
+                                            # 如果之前已有本地路径，删除旧文件
+                                            old_path = db_policy.markdown_local_path
+                                            new_path = storage_result.get("local_path")
+                                            if old_path and old_path != new_path and os.path.exists(old_path):
+                                                try:
+                                                    os.remove(old_path)
+                                                    logger.debug(f"删除旧markdown文件: {old_path}")
+                                                except Exception as e:
+                                                    logger.warning(f"删除旧markdown文件失败: {e}")
+                                            db_policy.markdown_local_path = new_path
                                             db_policy.markdown_s3_key = storage_result.get("s3_key")
+                                            # 记录原始文件路径，用于后续清理
+                                            saved_file_paths.add(markdown_path)
+                                            # 删除爬虫输出目录中的原始文件（已保存到存储服务）
+                                            try:
+                                                if os.path.exists(markdown_path) and markdown_path != new_path:
+                                                    os.remove(markdown_path)
+                                                    logger.debug(f"删除爬虫输出目录中的markdown文件: {markdown_path}")
+                                            except Exception as e:
+                                                logger.warning(f"删除爬虫输出文件失败: {e}")
                                             logger.debug(f"政策 {db_policy.id} 的markdown文件已保存到存储服务")
                                     except Exception as e:
                                         logger.warning(f"保存政策 {db_policy.id} 的markdown文件失败: {e}")
                             
-                            # 处理docx文件
+                            # 处理docx文件（确保文件已保存到存储服务）
                             if "docx_path" in policy_data and policy_data["docx_path"]:
                                 docx_path = policy_data["docx_path"]
                                 if os.path.exists(docx_path):
@@ -478,34 +612,106 @@ class TaskService:
                                             db_policy.id,
                                             "docx",
                                             docx_path,
-                                            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            task_id=task_id
                                         )
                                         if storage_result.get("success"):
-                                            db_policy.docx_local_path = storage_result.get("local_path")
+                                            # 如果之前已有本地路径，删除旧文件
+                                            old_path = db_policy.docx_local_path
+                                            new_path = storage_result.get("local_path")
+                                            if old_path and old_path != new_path and os.path.exists(old_path):
+                                                try:
+                                                    os.remove(old_path)
+                                                    logger.debug(f"删除旧docx文件: {old_path}")
+                                                except Exception as e:
+                                                    logger.warning(f"删除旧docx文件失败: {e}")
+                                            db_policy.docx_local_path = new_path
                                             db_policy.docx_s3_key = storage_result.get("s3_key")
+                                            # 记录原始文件路径，用于后续清理
+                                            saved_file_paths.add(docx_path)
+                                            # 删除爬虫输出目录中的原始文件（已保存到存储服务）
+                                            try:
+                                                if os.path.exists(docx_path) and docx_path != new_path:
+                                                    os.remove(docx_path)
+                                                    logger.debug(f"删除爬虫输出目录中的docx文件: {docx_path}")
+                                            except Exception as e:
+                                                logger.warning(f"删除爬虫输出文件失败: {e}")
                                             logger.debug(f"政策 {db_policy.id} 的docx文件已保存到存储服务")
                                     except Exception as e:
                                         logger.warning(f"保存政策 {db_policy.id} 的docx文件失败: {e}")
                             
+                            # 处理附件（如果爬虫下载了附件）
+                            if hasattr(policy, '_attachment_paths') and policy._attachment_paths:
+                                from ..models.attachment import Attachment
+                                for att_info in policy._attachment_paths:
+                                    if att_info.get('storage_path') and os.path.exists(att_info['storage_path']):
+                                        try:
+                                            # 通过存储服务保存附件（传入task_id，确保附件路径独立）
+                                            storage_result = storage_service.save_attachment(
+                                                db_policy.id,
+                                                att_info.get('file_name', ''),
+                                                att_info['storage_path'],
+                                                task_id=task_id
+                                            )
+                                            if storage_result.get("success"):
+                                                # 查找或创建附件记录
+                                                attachment = db.query(Attachment).filter(
+                                                    Attachment.policy_id == db_policy.id,
+                                                    Attachment.file_url == att_info.get('url', '')
+                                                ).first()
+                                                if not attachment:
+                                                    attachment = Attachment(
+                                                        policy_id=db_policy.id,
+                                                        file_name=att_info.get('name', att_info.get('file_name', '')),
+                                                        file_url=att_info.get('url', ''),
+                                                        file_size=os.path.getsize(att_info['storage_path']) if os.path.exists(att_info['storage_path']) else 0,
+                                                        file_type=os.path.splitext(att_info.get('file_name', ''))[1].lstrip('.'),
+                                                        file_path=storage_result.get("local_path")  # 使用正确的字段名
+                                                    )
+                                                    db.add(attachment)
+                                            else:
+                                                attachment.file_path = storage_result.get("local_path")  # 使用正确的字段名
+                                                attachment.file_s3_key = storage_result.get("s3_key")  # 使用正确的字段名
+                                                logger.debug(f"政策 {db_policy.id} 的附件已保存到存储服务")
+                                        except Exception as e:
+                                            logger.warning(f"保存政策 {db_policy.id} 的附件失败: {e}")
+                            
                             # 提交文件路径更新
                             db.commit()
-                            # 创建任务-政策关联
-                            task_policy = TaskPolicy(task_id=task_id, policy_id=db_policy.id)
-                            db.add(task_policy)
+                            # 创建任务-政策关联（虽然policy.task_id已经关联，但为了数据一致性，也创建TaskPolicy记录）
+                            # 注意：由于policy.task_id已经关联到任务，TaskPolicy主要用于查询和统计
+                            try:
+                                task_policy = TaskPolicy(task_id=task_id, policy_id=db_policy.id)
+                                db.add(task_policy)
+                                db.commit()  # 提交TaskPolicy关联
+                            except Exception as e:
+                                # 如果关联已存在，忽略错误
+                                logger.debug(f"TaskPolicy关联可能已存在: {e}")
+                                db.rollback()
                             
                             # 检查是否是新创建的（简单判断：爬取时间很近）
                             # 确保时区一致：使用 timezone-aware datetime
                             from datetime import timezone
                             now_utc = datetime.now(timezone.utc)
-                            if db_policy.crawl_time and (now_utc - db_policy.crawl_time).total_seconds() < 10:
-                                saved_count += 1
-                                # 更新进度消息
-                                if saved_count % 10 == 0:  # 每保存10条更新一次进度
-                                    progress_callback(f"已保存 {saved_count} 条政策...")
+                            
+                            # 确保 crawl_time 是 timezone-aware
+                            if db_policy.crawl_time:
+                                if db_policy.crawl_time.tzinfo is None:
+                                    # 假设是UTC时间，添加时区信息
+                                    crawl_time_utc = db_policy.crawl_time.replace(tzinfo=timezone.utc)
+                                else:
+                                    crawl_time_utc = db_policy.crawl_time
+                                
+                                if (now_utc - crawl_time_utc).total_seconds() < 10:
+                                    saved_count += 1
+                                    if saved_count % 10 == 0:  # 每保存10条更新一次进度
+                                        progress_callback(f"已保存 {saved_count} 条政策...")
+                                else:
+                                    skipped_count += 1
                             else:
+                                # 如果没有爬取时间，可能是旧数据
                                 skipped_count += 1
-                        else:
-                            failed_count += 1
+                            # 注意：failed_count只在except块中增加，这里不应该增加
                         
                         # 定期更新任务统计信息（每处理20条）
                         total_processed = saved_count + skipped_count + failed_count
@@ -513,9 +719,9 @@ class TaskService:
                             try:
                                 task = db.query(Task).filter(Task.id == task_id).first()
                                 if task:
-                                    task.policy_count = total_processed
+                                    task.policy_count = len(policies)  # 使用实际的政策总数
                                     task.success_count = saved_count
-                                    task.failed_count = failed_count
+                                    task.failed_count = failed_count + skipped_count
                                     db.commit()
                             except Exception as e:
                                 logger.warning(f"更新任务统计失败: {e}")
@@ -556,90 +762,150 @@ class TaskService:
                 
                 logger.info(f"任务完成: {task_id}, 爬取: {len(policies)}, 保存: {saved_count}, 跳过: {skipped_count}, 失败: {failed_count}")
                 
-                # 如果启用了S3，上传所有政策文件到S3并删除本地文件
+                # 任务完成后自动备份（如果启用）
+                if not was_stopped and task.status == "completed":
+                    task_config = task.config_json or {}
+                    backup_config = task_config.get("backup", {})
+                    
+                    # 兼容旧的auto_backup配置
+                    if task_config.get("auto_backup", False) and not backup_config:
+                        backup_config = {"enabled": True, "strategy": "always"}
+                    
+                    # 检查是否启用备份
+                    if backup_config.get("enabled", False):
+                        backup_strategy = backup_config.get("strategy", "always")
+                        should_backup = False
+                        
+                        if backup_strategy == "always":
+                            should_backup = True
+                        elif backup_strategy == "on_success":
+                            should_backup = task.status == "completed"
+                        elif backup_strategy == "on_new_policies":
+                            # 检查是否有新政策
+                            new_policies_count = saved_count
+                            min_policies = backup_config.get("min_policies", 0)
+                            should_backup = new_policies_count >= min_policies
+                        
+                        if should_backup:
+                            try:
+                                from .backup_service import BackupService
+                                backup_service = BackupService()
+                                # 优化备份名称：包含任务名称
+                                safe_task_name = "".join(c for c in task.task_name if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+                                backup_name = f"task_{task_id}_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                backup_record = backup_service.create_backup(
+                                    db=db,
+                                    backup_type="full",
+                                    backup_name=backup_name,
+                                    source_type="task",
+                                    source_id=str(task_id),
+                                    backup_strategy=backup_strategy,
+                                    source_name=task.task_name
+                                )
+                                logger.info(f"任务 {task_id} 完成后自动备份已创建: {backup_record.id} (策略: {backup_strategy})")
+                            except Exception as e:
+                                logger.warning(f"任务 {task_id} 完成后自动备份失败: {e}")
+                
+                # 如果启用了S3，确保所有已保存的文件都上传到S3
+                # 注意：文件在保存政策时已经通过storage_service保存，这里只需要处理可能遗漏的文件
                 try:
                     from .storage_service import StorageService
                     storage_service = StorageService()
                     if storage_service.s3_service.is_enabled():
-                        logger.info(f"开始上传任务 {task_id} 的文件到S3...")
+                        logger.info(f"检查任务 {task_id} 的文件是否已上传到S3...")
                         uploaded_count = 0
                         failed_upload_count = 0
                         
                         # 获取任务关联的所有政策
                         task_policies = db.query(TaskPolicy).filter(TaskPolicy.task_id == task_id).all()
                         policy_ids = [tp.policy_id for tp in task_policies]
-                        policies_to_upload = db.query(Policy).filter(Policy.id.in_(policy_ids)).all()
+                        policies_to_check = db.query(Policy).filter(Policy.id.in_(policy_ids)).all()
                         
-                        # 创建政策标题到政策对象的映射（用于匹配文件）
-                        policy_map = {policy.title: policy for policy in policies_to_upload}
+                        # 检查每个政策的文件，如果本地有但S3没有，则上传
+                        for policy in policies_to_check:
+                            # 检查markdown文件
+                            if policy.markdown_local_path and os.path.exists(policy.markdown_local_path) and not policy.markdown_s3_key:
+                                try:
+                                    # 使用包含task_id的路径，确保与保存时一致
+                                    if policy.task_id:
+                                        s3_key = f"policies/{policy.task_id}/{policy.id}/{policy.id}.md"
+                                    else:
+                                        s3_key = f"policies/{policy.id}/{policy.id}.md"
+                                    if storage_service.s3_service.upload_file(policy.markdown_local_path, s3_key, content_type="text/markdown"):
+                                        policy.markdown_s3_key = s3_key
+                                        # 删除本地文件（如果配置了只保留S3）
+                                        if storage_service.storage_mode == "s3":
+                                            os.remove(policy.markdown_local_path)
+                                            policy.markdown_local_path = None
+                                        db.commit()
+                                        uploaded_count += 1
+                                        logger.debug(f"政策 {policy.id} 的markdown文件已上传到S3")
+                                except Exception as e:
+                                    logger.warning(f"上传政策 {policy.id} 的markdown文件失败: {e}")
+                                    failed_upload_count += 1
+                            
+                            # 检查docx文件
+                            if policy.docx_local_path and os.path.exists(policy.docx_local_path) and not policy.docx_s3_key:
+                                try:
+                                    # 使用包含task_id的路径，确保与保存时一致
+                                    if policy.task_id:
+                                        s3_key = f"policies/{policy.task_id}/{policy.id}/{policy.id}.docx"
+                                    else:
+                                        s3_key = f"policies/{policy.id}/{policy.id}.docx"
+                                    if storage_service.s3_service.upload_file(policy.docx_local_path, s3_key, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+                                        policy.docx_s3_key = s3_key
+                                        # 删除本地文件（如果配置了只保留S3）
+                                        if storage_service.storage_mode == "s3":
+                                            os.remove(policy.docx_local_path)
+                                            policy.docx_local_path = None
+                                        db.commit()
+                                        uploaded_count += 1
+                                        logger.debug(f"政策 {policy.id} 的docx文件已上传到S3")
+                                except Exception as e:
+                                    logger.warning(f"上传政策 {policy.id} 的docx文件失败: {e}")
+                                    failed_upload_count += 1
                         
-                        # 扫描爬虫输出目录，查找markdown和docx文件
-                        output_dir = crawler_config.config.get("output_dir", "crawled_data")
-                        markdown_dir = os.path.join(output_dir, "markdown")
-                        docx_dir = os.path.join(output_dir, "docx")
-                        
-                        # 处理markdown文件
-                        if os.path.exists(markdown_dir):
-                            for filename in os.listdir(markdown_dir):
-                                if filename.endswith('.md'):
-                                    file_path = os.path.join(markdown_dir, filename)
-                                    # 尝试通过文件名匹配政策（文件名包含政策标题的一部分）
-                                    matched_policy = None
-                                    for title, policy in policy_map.items():
-                                        # 简化标题用于匹配
-                                        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
-                                        if safe_title and safe_title in filename:
-                                            matched_policy = policy
-                                            break
-                                    
-                                    if matched_policy:
-                                        try:
-                                            s3_key = f"policies/{matched_policy.id}/{matched_policy.id}.markdown"
-                                            if storage_service.s3_service.upload_file(file_path, s3_key, content_type="text/markdown"):
-                                                matched_policy.markdown_s3_key = s3_key
-                                                # 删除本地文件
+                        # 清理爬虫输出目录中的残留文件（如果文件已经保存到storage_service）
+                        # 注意：只删除已经保存到storage_service的文件，避免误删
+                        try:
+                            output_dir = crawler_config.config.get("output_dir", "crawled_data")
+                            markdown_dir = os.path.join(output_dir, "markdown")
+                            docx_dir = os.path.join(output_dir, "docx")
+                            
+                            # 清理markdown目录（只删除已保存的文件）
+                            if os.path.exists(markdown_dir):
+                                for filename in os.listdir(markdown_dir):
+                                    if filename.endswith('.md'):
+                                        file_path = os.path.join(markdown_dir, filename)
+                                        # 使用记录的原始文件路径来匹配，而不是通过文件名提取ID
+                                        # 因为文件名中的数字是markdown_number，不是policy.id
+                                        if file_path in saved_file_paths:
+                                            try:
                                                 os.remove(file_path)
-                                                matched_policy.markdown_local_path = None
-                                                uploaded_count += 1
-                                                logger.debug(f"政策 {matched_policy.id} 的markdown文件已上传到S3并删除本地文件")
-                                            else:
-                                                failed_upload_count += 1
-                                        except Exception as e:
-                                            logger.warning(f"上传政策 {matched_policy.id} 的markdown文件失败: {e}")
-                                            failed_upload_count += 1
-                        
-                        # 处理docx文件
-                        if os.path.exists(docx_dir):
-                            for filename in os.listdir(docx_dir):
-                                if filename.endswith('.docx'):
-                                    file_path = os.path.join(docx_dir, filename)
-                                    # 尝试通过文件名匹配政策
-                                    matched_policy = None
-                                    for title, policy in policy_map.items():
-                                        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
-                                        if safe_title and safe_title in filename:
-                                            matched_policy = policy
-                                            break
-                                    
-                                    if matched_policy:
-                                        try:
-                                            s3_key = f"policies/{matched_policy.id}/{matched_policy.id}.docx"
-                                            if storage_service.s3_service.upload_file(file_path, s3_key, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
-                                                matched_policy.docx_s3_key = s3_key
-                                                # 删除本地文件
+                                                logger.debug(f"清理已保存的markdown文件: {filename}")
+                                            except Exception as e:
+                                                logger.warning(f"删除文件失败 {file_path}: {e}")
+                            
+                            # 清理docx目录（只删除已保存的文件）
+                            if os.path.exists(docx_dir):
+                                for filename in os.listdir(docx_dir):
+                                    if filename.endswith('.docx'):
+                                        file_path = os.path.join(docx_dir, filename)
+                                        # 使用记录的原始文件路径来匹配，而不是通过文件名提取ID
+                                        # 因为文件名中的数字是markdown_number，不是policy.id
+                                        if file_path in saved_file_paths:
+                                            try:
                                                 os.remove(file_path)
-                                                matched_policy.docx_local_path = None
-                                                uploaded_count += 1
-                                                logger.debug(f"政策 {matched_policy.id} 的docx文件已上传到S3并删除本地文件")
-                                            else:
-                                                failed_upload_count += 1
-                                        except Exception as e:
-                                            logger.warning(f"上传政策 {matched_policy.id} 的docx文件失败: {e}")
-                                            failed_upload_count += 1
+                                                logger.debug(f"清理已保存的docx文件: {filename}")
+                                            except Exception as e:
+                                                logger.warning(f"删除文件失败 {file_path}: {e}")
+                        except Exception as e:
+                            logger.warning(f"清理输出目录失败: {e}")
                         
-                        # 提交数据库更改
-                        db.commit()
-                        logger.info(f"文件上传完成: 成功 {uploaded_count} 个, 失败 {failed_upload_count} 个")
+                        if uploaded_count > 0 or failed_upload_count > 0:
+                            logger.info(f"文件检查完成: 新上传 {uploaded_count} 个, 失败 {failed_upload_count} 个")
+                        else:
+                            logger.debug("所有文件已正确保存到存储服务")
                 except Exception as e:
                     logger.error(f"上传文件到S3失败: {e}", exc_info=True)
                     db.rollback()
@@ -648,7 +914,8 @@ class TaskService:
                 try:
                     from .email_service import get_email_service
                     email_service = get_email_service()
-                    if email_service.is_enabled() and email_service.to_addresses:
+                    # 传入db以实时加载配置
+                    if email_service.is_enabled(db) and email_service.to_addresses:
                         import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
@@ -660,7 +927,8 @@ class TaskService:
                                 success_count=saved_count,
                                 failed_count=failed_count + skipped_count,
                                 start_time=task.start_time,
-                                end_time=datetime.now()
+                                end_time=datetime.now(),
+                                db=db  # 传入db以实时加载配置
                             ))
                         finally:
                             loop.close()
@@ -670,12 +938,12 @@ class TaskService:
             except Exception as e:
                 logger.error(f"任务执行失败: {e}", exc_info=True)
                 
-                # 检查是否是因为停止请求而退出
+                # 检查是否是因为停止请求而退出 - 线程安全
                 task = db.query(Task).filter(Task.id == task_id).first()
                 was_stopped = False
-                if task_id in self._crawler_instances:
-                    crawler = self._crawler_instances[task_id]
-                    if hasattr(crawler, 'stop_requested') and crawler.stop_requested:
+                with self._crawler_lock:
+                    crawler = self._crawler_instances.get(task_id)
+                    if crawler and hasattr(crawler, 'stop_requested') and crawler.stop_requested:
                         was_stopped = True
                         # 如果任务被停止，检查当前状态决定是暂停还是取消
                         if task and task.status == "paused":
@@ -687,20 +955,28 @@ class TaskService:
                 
                 if not was_stopped:
                     task.status = "failed"
-                    task.error_message = str(e)
+                    # 清理错误消息中的敏感信息
+                    try:
+                        from .utils import sanitize_error_message
+                        task.error_message = sanitize_error_message(e)
+                    except ImportError:
+                        # 如果utils模块不存在，使用简单的错误消息
+                        task.error_message = f"任务执行失败: {type(e).__name__}"
                 
                 task.end_time = datetime.now()
                 db.commit()
                 
-                # 清理爬虫实例引用
-                if task_id in self._crawler_instances:
-                    del self._crawler_instances[task_id]
+                # 清理爬虫实例引用 - 线程安全
+                with self._crawler_lock:
+                    if task_id in self._crawler_instances:
+                        del self._crawler_instances[task_id]
                 
                 # 发送邮件通知（如果启用且有收件人）
                 try:
                     from .email_service import get_email_service
                     email_service = get_email_service()
-                    if email_service.is_enabled() and email_service.to_addresses:
+                    # 传入db以实时加载配置
+                    if email_service.is_enabled(db) and email_service.to_addresses:
                         import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
@@ -713,7 +989,8 @@ class TaskService:
                                 failed_count=failed_count if 'failed_count' in locals() else 0,
                                 error_message=str(e),
                                 start_time=task.start_time,
-                                end_time=datetime.now()
+                                end_time=datetime.now(),
+                                db=db  # 传入db以实时加载配置
                             ))
                         finally:
                             loop.close()
@@ -722,15 +999,21 @@ class TaskService:
                 
         except Exception as e:
             logger.error(f"执行任务异常: {e}", exc_info=True)
-            # 清理爬虫实例引用
-            if task_id in self._crawler_instances:
-                del self._crawler_instances[task_id]
+            # 清理爬虫实例引用 - 线程安全
+            with self._crawler_lock:
+                if task_id in self._crawler_instances:
+                    del self._crawler_instances[task_id]
         finally:
             # 清理运行中的任务记录
             if task_id in self._running_tasks:
                 del self._running_tasks[task_id]
-            # 确保清理爬虫实例引用
-            if task_id in self._crawler_instances:
-                del self._crawler_instances[task_id]
-            db.close()
+            # 确保清理爬虫实例引用 - 线程安全
+            with self._crawler_lock:
+                if task_id in self._crawler_instances:
+                    del self._crawler_instances[task_id]
+            # 确保总是关闭数据库会话
+            try:
+                db.close()
+            except Exception as e:
+                logger.error(f"关闭数据库会话失败: {e}")
 

@@ -279,11 +279,16 @@ class SchedulerService:
                 db.commit()
                 logger.info(f"定时任务执行成功: {scheduled_task.task_name}, 耗时: {duration}秒")
                 
+                # 检查是否需要备份（在任务完成后）
+                if scheduled_task.task_type == "crawl_task":
+                    self._check_scheduled_task_backup(scheduled_task, result, db, start_time, end_time)
+                
                 # 发送邮件通知（如果启用且有收件人）
                 try:
                     from .email_service import get_email_service
                     email_service = get_email_service()
-                    if email_service.is_enabled() and email_service.to_addresses:
+                    # 传入db以实时加载配置
+                    if email_service.is_enabled(db) and email_service.to_addresses:
                         import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
@@ -296,7 +301,8 @@ class SchedulerService:
                                 success_count=task_info.get("success_count", 0) if isinstance(task_info, dict) else 0,
                                 failed_count=task_info.get("failed_count", 0) if isinstance(task_info, dict) else 0,
                                 start_time=start_time,
-                                end_time=end_time
+                                end_time=end_time,
+                                db=db  # 传入db以实时加载配置
                             ))
                         finally:
                             loop.close()
@@ -338,7 +344,8 @@ class SchedulerService:
                                 policy_count=0,
                                 success_count=0,
                                 failed_count=0,
-                                error_message=error_msg
+                                error_message=error_msg,
+                                db=db  # 传入db以实时加载配置
                             ))
                         finally:
                             loop.close()
@@ -349,6 +356,155 @@ class SchedulerService:
             logger.error(f"执行定时任务异常: {scheduled_task_id} - {e}", exc_info=True)
         finally:
             db.close()
+    
+    def _check_scheduled_task_backup(
+        self,
+        scheduled_task: ScheduledTask,
+        result: Dict[str, Any],
+        db: Session,
+        start_time: datetime,
+        end_time: datetime
+    ):
+        """检查定时任务是否需要备份"""
+        backup_config = scheduled_task.config_json.get("backup", {}) if scheduled_task.config_json else {}
+        
+        # 如果未启用备份，直接返回
+        if not backup_config.get("enabled", False):
+            return
+        
+        backup_strategy = backup_config.get("strategy", "never")
+        should_backup = False
+        
+        # 检查备份策略
+        if backup_strategy == "never":
+            should_backup = False
+        elif backup_strategy == "on_success":
+            should_backup = result.get("status") == "completed"
+        elif backup_strategy == "on_new_policies":
+            new_policies_count = result.get("success_count", 0)
+            min_policies = backup_config.get("min_policies", 0)
+            should_backup = new_policies_count >= min_policies
+        elif backup_strategy in ["daily", "weekly", "monthly"]:
+            # 按时间策略备份
+            should_backup = self._should_backup_by_time(
+                scheduled_task.id,
+                backup_strategy,
+                db
+            )
+        
+        if should_backup:
+            try:
+                from .backup_service import BackupService
+                backup_service = BackupService()
+                
+                # 生成备份名称
+                if backup_strategy in ["daily", "weekly", "monthly"]:
+                    date_str = datetime.now().strftime("%Y%m%d")
+                    backup_name = f"scheduled_{scheduled_task.id}_{backup_strategy}_{date_str}"
+                else:
+                    safe_task_name = "".join(c for c in scheduled_task.task_name if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+                    backup_name = f"scheduled_{scheduled_task.id}_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                
+                backup_record = backup_service.create_backup(
+                    db=db,
+                    backup_type="full",
+                    backup_name=backup_name,
+                    source_type="scheduled",
+                    source_id=str(scheduled_task.id),
+                    backup_strategy=backup_strategy,
+                    source_name=scheduled_task.task_name
+                )
+                
+                # 如果配置了最大备份数量，清理旧备份
+                max_backups = backup_config.get("max_backups")
+                if max_backups:
+                    self._cleanup_old_backups(scheduled_task.id, max_backups, db)
+                
+                logger.info(f"定时任务 {scheduled_task.id} 完成后自动备份已创建: {backup_record.id} (策略: {backup_strategy})")
+            except Exception as e:
+                logger.warning(f"定时任务 {scheduled_task.id} 完成后自动备份失败: {e}")
+    
+    def _should_backup_by_time(
+        self,
+        scheduled_task_id: int,
+        strategy: str,
+        db: Session
+    ) -> bool:
+        """检查是否应该按时间策略备份"""
+        from datetime import date, timedelta
+        from sqlalchemy import func
+        from ..models.system_config import BackupRecord
+        
+        today = date.today()
+        
+        if strategy == "daily":
+            # 检查今天是否已备份
+            existing_backup = db.query(BackupRecord).filter(
+                BackupRecord.source_type == "scheduled",
+                BackupRecord.source_id == str(scheduled_task_id),
+                BackupRecord.backup_strategy == "daily",
+                func.date(BackupRecord.start_time) == today
+            ).first()
+            return existing_backup is None
+        
+        elif strategy == "weekly":
+            # 检查本周是否已备份
+            week_start = today - timedelta(days=today.weekday())
+            existing_backup = db.query(BackupRecord).filter(
+                BackupRecord.source_type == "scheduled",
+                BackupRecord.source_id == str(scheduled_task_id),
+                BackupRecord.backup_strategy == "weekly",
+                func.date(BackupRecord.start_time) >= week_start
+            ).first()
+            return existing_backup is None
+        
+        elif strategy == "monthly":
+            # 检查本月是否已备份
+            month_start = today.replace(day=1)
+            existing_backup = db.query(BackupRecord).filter(
+                BackupRecord.source_type == "scheduled",
+                BackupRecord.source_id == str(scheduled_task_id),
+                BackupRecord.backup_strategy == "monthly",
+                func.date(BackupRecord.start_time) >= month_start
+            ).first()
+            return existing_backup is None
+        
+        return False
+    
+    def _cleanup_old_backups(
+        self,
+        scheduled_task_id: int,
+        max_backups: int,
+        db: Session
+    ):
+        """清理旧备份，只保留最新的N个"""
+        import os
+        from ..models.system_config import BackupRecord
+        
+        backups = db.query(BackupRecord).filter(
+            BackupRecord.source_type == "scheduled",
+            BackupRecord.source_id == str(scheduled_task_id)
+        ).order_by(BackupRecord.start_time.desc()).all()
+        
+        if len(backups) > max_backups:
+            # 删除多余的备份
+            for backup in backups[max_backups:]:
+                try:
+                    # 删除备份文件
+                    if backup.local_path and os.path.exists(backup.local_path):
+                        os.remove(backup.local_path)
+                    # 删除S3备份（如果有）
+                    if backup.s3_key:
+                        from .storage_service import StorageService
+                        storage_service = StorageService()
+                        if storage_service.s3_service.is_enabled():
+                            storage_service.s3_service.delete_file(backup.s3_key)
+                    # 删除数据库记录
+                    db.delete(backup)
+                except Exception as e:
+                    logger.warning(f"清理旧备份失败: {backup.id} - {e}")
+            
+            db.commit()
     
     def _execute_crawl_task(self, scheduled_task: ScheduledTask, db: Session) -> Dict[str, Any]:
         """执行爬虫任务"""
@@ -366,10 +522,29 @@ class SchedulerService:
         # 启动任务（后台执行）
         task = self.task_service.start_task(db=db, task_id=task.id, background=True)
         
+        # 等待任务完成（最多等待5分钟）
+        import time
+        max_wait_time = 300  # 5分钟
+        wait_interval = 2  # 每2秒检查一次
+        waited_time = 0
+        
+        while waited_time < max_wait_time:
+            db.refresh(task)
+            if task.status in ["completed", "failed", "cancelled"]:
+                break
+            time.sleep(wait_interval)
+            waited_time += wait_interval
+        
+        # 获取任务结果
+        from ..models.task import Task
+        final_task = db.query(Task).filter(Task.id == task.id).first()
+        
         return {
-            "task_id": task.id,
-            "task_name": task.task_name,
-            "status": task.status
+            "task_id": final_task.id if final_task else task.id,
+            "task_name": final_task.task_name if final_task else task.task_name,
+            "status": final_task.status if final_task else task.status,
+            "success_count": getattr(final_task, 'success_count', 0) if final_task else 0,
+            "failed_count": getattr(final_task, 'failed_count', 0) if final_task else 0
         }
     
     def _execute_backup_task(self, scheduled_task: ScheduledTask, db: Session) -> Dict[str, Any]:
@@ -464,6 +639,19 @@ class SchedulerService:
         if not scheduled_task:
             return False
         
+        # 更新关联的备份记录
+        from ..models.system_config import BackupRecord
+        backups = db.query(BackupRecord).filter(
+            BackupRecord.source_type == "scheduled",
+            BackupRecord.source_id == str(scheduled_task_id)
+        ).all()
+        
+        for backup in backups:
+            backup.source_deleted = True
+            # 如果还没有保存任务名称，现在保存
+            if not backup.source_name:
+                backup.source_name = scheduled_task.task_name
+        
         # 如果启用，先从调度器移除
         if scheduled_task.is_enabled and self.scheduler and self.scheduler.running:
             job_id = f"scheduled_task_{scheduled_task_id}"
@@ -471,12 +659,14 @@ class SchedulerService:
                 self.scheduler.remove_job(job_id)
                 if job_id in self._job_mapping:
                     del self._job_mapping[job_id]
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"从调度器移除任务失败: {e}")
         
+        # 删除定时任务
         db.delete(scheduled_task)
         db.commit()
-        logger.info(f"已删除定时任务: {scheduled_task.task_name}")
+        
+        logger.info(f"已删除定时任务: {scheduled_task.task_name} (ID: {scheduled_task_id}), 更新了 {len(backups)} 个备份记录")
         return True
     
     def get_scheduled_task(self, db: Session, scheduled_task_id: int) -> Optional[ScheduledTask]:

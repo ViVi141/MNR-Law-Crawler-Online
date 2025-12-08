@@ -25,6 +25,12 @@ class BackupRecordResponse(BaseModel):
     end_time: Optional[datetime] = None
     error_message: Optional[str] = None
     created_at: datetime
+    # 新增字段：备份来源信息
+    source_type: Optional[str] = None  # manual/task/scheduled
+    source_id: Optional[str] = None  # 关联的任务ID或定时任务ID
+    source_name: Optional[str] = None  # 备份时保存的任务名称
+    source_deleted: Optional[bool] = False  # 来源是否已删除
+    backup_strategy: Optional[str] = None  # 备份策略
 
     class Config:
         from_attributes = True

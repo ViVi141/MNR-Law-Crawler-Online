@@ -34,7 +34,11 @@ class BackupService:
         self,
         db: Session,
         backup_type: str = "full",
-        backup_name: Optional[str] = None
+        backup_name: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_id: Optional[str] = None,
+        backup_strategy: Optional[str] = None,
+        source_name: Optional[str] = None
     ) -> BackupRecord:
         """创建数据库备份
         
@@ -71,7 +75,12 @@ class BackupService:
             backup_type=backup_type,
             status="pending",
             start_time=datetime.now(),
-            local_path=str(backup_path)
+            local_path=str(backup_path),
+            source_type=source_type,
+            source_id=str(source_id) if source_id else None,
+            backup_strategy=backup_strategy,
+            source_name=source_name,
+            source_deleted=False
         )
         db.add(backup_record)
         db.commit()
@@ -157,7 +166,8 @@ class BackupService:
             try:
                 from .email_service import get_email_service
                 email_service = get_email_service()
-                if email_service.is_enabled() and email_service.to_addresses:
+                # 传入db以实时加载配置
+                if email_service.is_enabled(db) and email_service.to_addresses:
                     import asyncio
                     from datetime import datetime
                     loop = asyncio.new_event_loop()
@@ -169,7 +179,8 @@ class BackupService:
                             file_size=file_size_str,
                             status="completed",
                             start_time=backup_record.start_time,
-                            end_time=backup_record.end_time
+                            end_time=backup_record.end_time,
+                            db=db  # 传入db以实时加载配置
                         ))
                     finally:
                         loop.close()
@@ -191,7 +202,8 @@ class BackupService:
             try:
                 from .email_service import get_email_service
                 email_service = get_email_service()
-                if email_service.is_enabled() and email_service.to_addresses:
+                # 传入db以实时加载配置
+                if email_service.is_enabled(db) and email_service.to_addresses:
                     import asyncio
                     from datetime import datetime
                     loop = asyncio.new_event_loop()
@@ -204,7 +216,8 @@ class BackupService:
                             status="failed",
                             error_message=str(e),
                             start_time=backup_record.start_time,
-                            end_time=backup_record.end_time
+                            end_time=backup_record.end_time,
+                            db=db  # 传入db以实时加载配置
                         ))
                     finally:
                         loop.close()
@@ -325,7 +338,9 @@ class BackupService:
         skip: int = 0,
         limit: int = 20,
         backup_type: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_deleted: Optional[bool] = None
     ) -> tuple[List[BackupRecord], int]:
         """获取备份记录列表"""
         query = db.query(BackupRecord)
@@ -334,6 +349,10 @@ class BackupService:
             query = query.filter(BackupRecord.backup_type == backup_type)
         if status:
             query = query.filter(BackupRecord.status == status)
+        if source_type:
+            query = query.filter(BackupRecord.source_type == source_type)
+        if source_deleted is not None:
+            query = query.filter(BackupRecord.source_deleted == source_deleted)
         
         total = query.count()
         records = query.order_by(BackupRecord.created_at.desc()).offset(skip).limit(limit).all()

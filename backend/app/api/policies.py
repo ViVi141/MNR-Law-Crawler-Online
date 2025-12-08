@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 import logging
+import os
 
 from ..database import get_db
 from ..middleware.auth import get_current_user
@@ -38,6 +39,7 @@ def get_policies(
     publisher: Optional[str] = Query(None, description="发布机构筛选"),
     source_name: Optional[str] = Query(None, description="数据源筛选"),
     task_id: Optional[int] = Query(None, description="任务ID筛选，只返回该任务爬取的政策"),
+    use_fulltext: bool = Query(False, description="是否使用全文搜索（当提供keyword时）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -66,7 +68,22 @@ def get_policies(
         filtered_publisher = publisher.strip() if publisher and publisher.strip() else None
         filtered_source_name = source_name.strip() if source_name and source_name.strip() else None
         
-        policies, total = policy_service.get_policies(
+        # 统一搜索API：如果提供关键词且启用全文搜索，使用全文搜索；否则使用普通筛选
+        if filtered_keyword and use_fulltext:
+            # 使用全文搜索
+            policies, total = search_service.search(
+                db=db,
+                query=filtered_keyword,
+                skip=skip,
+                limit=limit,
+                category=filtered_category,
+                level=filtered_level,
+                start_date=parsed_start_date.strftime("%Y-%m-%d") if parsed_start_date else None,
+                end_date=parsed_end_date.strftime("%Y-%m-%d") if parsed_end_date else None
+            )
+        else:
+            # 使用普通筛选
+            policies, total = policy_service.get_policies(
             db=db,
             skip=skip,
             limit=limit,
@@ -244,39 +261,146 @@ def get_policy_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取政策文件（json/markdown/docx）"""
+    """获取政策文件（markdown/docx）"""
     policy = policy_service.get_policy_by_id(db, policy_id)
     
     if not policy:
         raise HTTPException(status_code=404, detail="政策不存在")
     
-    if file_type not in ["json", "markdown", "docx"]:
+    if file_type not in ["markdown", "docx"]:
         raise HTTPException(status_code=400, detail="不支持的文件类型")
     
-    # 使用存储服务获取文件路径
+    # 使用存储服务获取文件路径（使用policy的task_id，确保文件路径正确）
     from ..services.storage_service import StorageService
     storage_service = StorageService()
-    file_path = storage_service.get_policy_file_path(policy_id, file_type)
+    file_path = storage_service.get_policy_file_path(policy_id, file_type, task_id=policy.task_id)
     
-    if not file_path:
+    # 如果文件不存在，尝试重新生成（作为后备方案）
+    # 注意：正常情况下，文件应该在任务执行时已保存到存储服务
+    if not file_path or not os.path.exists(file_path):
+        logger.warning(f"政策 {policy_id} 的 {file_type} 文件不存在，尝试重新生成（正常情况下文件应在任务执行时已保存）...")
+        try:
+            # 使用storage_service的临时目录
+            from ..services.file_cleanup_service import get_cleanup_service
+            cleanup_service = get_cleanup_service()
+            
+            temp_base_dir = storage_service.local_dir / "temp_generated" / str(policy_id)
+            temp_base_dir.mkdir(parents=True, exist_ok=True)
+            # 将文件类型转换为实际扩展名
+            file_ext = "md" if file_type == "markdown" else file_type
+            temp_file_path = temp_base_dir / f"{policy_id}.{file_ext}"
+            
+            # 根据文件类型生成文件
+            if file_type == "markdown":
+                from .tasks import _generate_markdown_from_policy
+                md_content = _generate_markdown_from_policy(policy)
+                with open(temp_file_path, 'w', encoding='utf-8') as f:
+                    f.write(md_content)
+            elif file_type == "docx":
+                from .tasks import _generate_docx_from_policy
+                from ..core.converter import DocumentConverter
+                converter = DocumentConverter()
+                _generate_docx_from_policy(policy, str(temp_file_path), converter)
+            
+            if temp_file_path.exists() and temp_file_path.stat().st_size > 0:
+                file_path = str(temp_file_path)
+                cleanup_service.register_temp_file(file_path)
+                
+                # 重新生成后，保存到存储服务，以便后续使用（使用policy的task_id）
+                try:
+                    storage_result = storage_service.save_policy_file(
+                        policy_id,
+                        file_type,
+                        file_path,
+                        task_id=policy.task_id
+                    )
+                    if storage_result.get("success"):
+                        # 更新数据库中的路径
+                        if file_type == "markdown":
+                            policy.markdown_local_path = storage_result.get("local_path")
+                            policy.markdown_s3_key = storage_result.get("s3_key")
+                        elif file_type == "docx":
+                            policy.docx_local_path = storage_result.get("local_path")
+                            policy.docx_s3_key = storage_result.get("s3_key")
+                        db.commit()
+                        logger.info(f"重新生成的文件已保存到存储服务: {storage_result.get('local_path')}")
+                except Exception as e:
+                    logger.warning(f"保存重新生成的文件到存储服务失败: {e}")
+                
+                logger.info(f"成功重新生成政策 {policy_id} 的 {file_type} 文件")
+            else:
+                raise HTTPException(status_code=404, detail="文件不存在且无法重新生成")
+        except Exception as e:
+            logger.error(f"重新生成政策 {policy_id} 的 {file_type} 文件失败: {e}")
+            raise HTTPException(status_code=404, detail=f"文件不存在且重新生成失败: {str(e)}")
+    
+    if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
     
     # 返回文件
     from fastapi.responses import FileResponse
-    import os
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
     
     media_type_map = {
-        "json": "application/json",
         "markdown": "text/markdown",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     }
     
+    # 将文件类型转换为实际扩展名
+    file_ext = "md" if file_type == "markdown" else file_type
     return FileResponse(
         file_path,
         media_type=media_type_map.get(file_type, "application/octet-stream"),
-        filename=f"policy_{policy_id}.{file_type}"
+        filename=f"policy_{policy_id}.{file_ext}"
+    )
+
+
+@router.get("/{policy_id}/attachments/{attachment_id}/download")
+def download_attachment(
+    policy_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """下载附件文件"""
+    # 验证政策存在
+    policy = policy_service.get_policy_by_id(db, policy_id)
+    if not policy:
+        raise HTTPException(status_code=404, detail="政策不存在")
+    
+    # 获取附件
+    from ..models.attachment import Attachment
+    attachment = db.query(Attachment).filter(
+        Attachment.id == attachment_id,
+        Attachment.policy_id == policy_id
+    ).first()
+    
+    if not attachment:
+        raise HTTPException(status_code=404, detail="附件不存在")
+    
+    # 使用存储服务获取文件路径
+    from ..services.storage_service import StorageService
+    storage_service = StorageService()
+    
+    # 获取附件文件路径（使用policy的task_id，确保文件路径正确）
+    file_path = None
+    if attachment.file_path and os.path.exists(attachment.file_path):
+        file_path = attachment.file_path
+    elif attachment.file_s3_key:
+        # 从S3下载
+        file_path = storage_service.get_attachment_file_path(policy_id, attachment.file_name, task_id=policy.task_id)
+    else:
+        # 尝试从原始URL下载（如果文件未保存）
+        logger.warning(f"附件 {attachment_id} 的文件路径不存在，尝试从URL下载")
+        # 这里可以添加从URL下载的逻辑，但通常附件应该已经保存
+    
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="附件文件不存在")
+    
+    # 返回文件
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        file_path,
+        media_type="application/octet-stream",
+        filename=attachment.file_name
     )
 

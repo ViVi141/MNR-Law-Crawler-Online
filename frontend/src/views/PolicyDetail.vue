@@ -15,7 +15,6 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="markdown">Markdown</el-dropdown-item>
-                  <el-dropdown-item command="json">JSON</el-dropdown-item>
                   <el-dropdown-item command="docx">DOCX</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -173,7 +172,9 @@ const handleDownload = async (fileType: string) => {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${policy.value.title}.${fileType}`
+    // 将文件类型转换为实际扩展名（markdown -> md）
+    const fileExt = fileType === 'markdown' ? 'md' : fileType
+    a.download = `${policy.value.title}.${fileExt}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

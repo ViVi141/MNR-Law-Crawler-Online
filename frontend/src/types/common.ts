@@ -31,6 +31,12 @@ export interface CrawlTaskConfig {
   end_date?: string
   limit_pages?: number
   data_sources?: DataSourceConfig[]  // 数据源配置，如果提供则使用指定的数据源
+  auto_backup?: boolean  // 任务完成后是否自动备份（已废弃，使用backup配置）
+  backup?: {
+    enabled: boolean  // 是否启用自动备份
+    strategy?: 'always' | 'on_success' | 'on_new_policies'  // 备份策略
+    min_policies?: number  // 最小政策数量阈值（仅当策略为on_new_policies时有效）
+  }
 }
 
 export interface BackupTaskConfig {

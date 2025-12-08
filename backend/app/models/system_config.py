@@ -33,4 +33,10 @@ class BackupRecord(Base):
     end_time = Column(DateTime(timezone=True))
     error_message = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # 新增字段：备份来源信息
+    source_type = Column(String(50))  # manual/task/scheduled - 备份来源类型
+    source_id = Column(String(100))  # 关联的任务ID或定时任务ID
+    backup_strategy = Column(String(50))  # always/on_success/on_new_policies/daily/weekly/monthly - 备份策略
+    source_deleted = Column(Boolean, default=False)  # 来源是否已删除
+    source_name = Column(String(255))  # 备份时保存的任务名称（用于追溯，即使任务删除也能知道来源）
 

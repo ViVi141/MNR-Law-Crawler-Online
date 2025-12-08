@@ -8,6 +8,7 @@ import json
 import time
 import logging
 import hashlib
+import threading
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 from urllib.parse import urljoin
@@ -21,6 +22,11 @@ from .mnr_spider import MNRSpider
 
 # 使用模块级logger
 logger = logging.getLogger(__name__)
+
+# 文件编号锁和计数器（类级别，所有实例共享）
+_file_number_lock = threading.Lock()
+_markdown_counter = 0
+_file_counter = 0
 
 # 自然资源部分类配置
 MNR_CATEGORIES = {
@@ -533,7 +539,6 @@ class PolicyCrawler:
                 logger.error(f"数据源 {source_name} 爬取异常: {e}", exc_info=True)
                 
                 # 记录数据源级别的失败（如果获取到政策但爬取失败）
-                log_dir = self.config.get("log_dir", "logs")
                 # 使用logger记录失败信息
                 logger.error(f"数据源 {source_name} 爬取失败: {error_msg}")
                 # 继续处理下一个数据源，不中断整个流程
@@ -663,7 +668,6 @@ class PolicyCrawler:
         except Exception as e:
             # 记录失败信息到专门的失败日志
             error_msg = str(e)
-            log_dir = self.config.get("log_dir", "logs")
             
             # 检查是否需要重试
             max_policy_retries = self.config.get("max_policy_retries", 0)
@@ -883,50 +887,42 @@ class PolicyCrawler:
             logger.error(f"DOCX生成失败: {e}", exc_info=True)
     
     def _get_next_markdown_number(self) -> int:
-        """获取下一个 Markdown 文件编号"""
-        markdown_dir = f"{self.config.output_dir}/markdown"
+        """获取下一个 Markdown 文件编号（线程安全）"""
+        global _markdown_counter, _file_number_lock
         
-        if not os.path.exists(markdown_dir):
-            return 1
-        
-        existing_files = [f for f in os.listdir(markdown_dir) if f.endswith('.md')]
-        
-        if not existing_files:
-            return 1
-        
-        numbers = []
-        for filename in existing_files:
-            parts = filename.split('_', 1)
-            if parts and len(parts) >= 2 and parts[0].isdigit():
-                numbers.append(int(parts[0]))
-        
-        if not numbers:
-            return 1
-        
-        return max(numbers) + 1
+        with _file_number_lock:
+            # 如果计数器为0，从文件系统初始化
+            if _markdown_counter == 0:
+                markdown_dir = f"{self.config.output_dir}/markdown"
+                if os.path.exists(markdown_dir):
+                    existing_files = [f for f in os.listdir(markdown_dir) if f.endswith('.md')]
+                    if existing_files:
+                        numbers = []
+                        for filename in existing_files:
+                            parts = filename.split('_', 1)
+                            if parts and len(parts) >= 2 and parts[0].isdigit():
+                                numbers.append(int(parts[0]))
+                                if numbers:
+                                    _markdown_counter = max(numbers)
     
     def _get_next_file_number(self) -> int:
-        """获取下一个附件文件编号"""
-        files_dir = f"{self.config.output_dir}/files"
+        """获取下一个附件文件编号（线程安全）"""
+        global _file_counter, _file_number_lock
         
-        if not os.path.exists(files_dir):
-            return 1
-        
-        existing_files = os.listdir(files_dir)
-        
-        if not existing_files:
-            return 1
-        
-        numbers = []
-        for filename in existing_files:
-            parts = filename.split('_', 1)
-            if parts and len(parts) >= 2 and parts[0].isdigit():
-                numbers.append(int(parts[0]))
-        
-        if not numbers:
-            return 1
-        
-        return max(numbers) + 1
+        with _file_number_lock:
+            # 如果计数器为0，从文件系统初始化
+            if _file_counter == 0:
+                files_dir = f"{self.config.output_dir}/files"
+                if os.path.exists(files_dir):
+                    existing_files = os.listdir(files_dir)
+                    if existing_files:
+                        numbers = []
+                        for filename in existing_files:
+                            parts = filename.split('_', 1)
+                            if parts and len(parts) >= 2 and parts[0].isdigit():
+                                numbers.append(int(parts[0]))
+                                if numbers:
+                                    _file_counter = max(numbers)
     
     def _download_attachments(
         self,
@@ -1054,6 +1050,15 @@ class PolicyCrawler:
                 if callback:
                     callback(f"    [OK] 下载成功: {save_filename}")
                 logger.debug(f"附件下载成功: {save_path}")
+                # 保存附件路径到policy对象，以便后续保存到数据库
+                if not hasattr(policy, '_attachment_paths'):
+                    policy._attachment_paths = []
+                policy._attachment_paths.append({
+                    'url': url,
+                    'name': name,
+                    'storage_path': save_path,
+                    'file_name': save_filename
+                })
             else:
                 if callback:
                     callback(f"    [X] 下载失败: {name or url}")

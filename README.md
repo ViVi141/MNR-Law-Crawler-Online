@@ -346,12 +346,55 @@ npm run lint
 
 ---
 
-**版本**: 1.0.0  
+**版本**: 1.1.0  
 **最后更新**: 2025-12-08  
 **项目主页**: https://github.com/ViVi141/mnr-law-crawler-online  
 **原爬虫项目**: https://github.com/ViVi141/mnr-law-crawler
 
 ## 📝 更新日志
+
+### v1.1.0 (2025-12-08) - BUG修复与系统优化
+
+#### 🐛 严重BUG修复
+- 🔧 **修复任务统计错误**：修复了`failed_count`计算错误，确保任务统计信息准确
+  - 修复了所有政策（无论成功还是失败）都被计入`failed_count`的问题
+  - 现在`failed_count`只在保存失败时正确增加
+- 🔧 **修复S3文件路径不一致**：修复了任务完成后检查S3上传时路径不匹配的问题
+  - 统一使用包含`task_id`的文件路径格式：`policies/{task_id}/{policy_id}/{policy_id}.md`
+  - 确保文件保存和检查时使用相同的路径规则
+- 🔧 **修复文件清理逻辑**：修复了文件清理时政策ID提取错误的问题
+  - 使用记录的原始文件路径来匹配文件，而不是通过文件名提取ID
+  - 解决了文件名中的`markdown_number`与`policy.id`不一致导致的清理失败问题
+- 🔧 **修复附件路径问题**：修复了附件路径不包含`task_id`的问题
+  - 附件路径现在包含`task_id`，确保不同任务的附件独立存储
+  - 修复了`save_attachment`函数调用时缺少`task_id`参数的问题
+- 🔧 **修复文件清理函数**：为`cleanup_policy_files`函数添加了`task_id`参数支持
+  - 确保删除文件时使用正确的路径（包含`task_id`）
+  - 避免文件残留和路径错误问题
+
+#### 🎯 系统优化
+- 📊 **数据独立性增强**：所有文件路径现在都包含`task_id`，确保不同任务的数据完全独立
+- 🗂️ **文件管理改进**：改进了文件保存和清理逻辑，提高了文件管理的可靠性
+- 🔍 **代码质量提升**：修复了多个数据流一致性问题，提高了系统的稳定性
+
+#### 📝 数据库迁移
+- ✨ **新增迁移**：`005_add_backup_source_fields.py` - 添加备份源字段
+- ✨ **新增迁移**：`006_add_policy_task_id.py` - 为政策表添加`task_id`字段
+
+#### 🛠️ 技术改进
+- 📦 **新增工具模块**：`backend/app/services/utils.py` - 通用工具函数
+- 🔄 **服务层优化**：优化了多个服务层的代码逻辑和错误处理
+  - 优化了`task_service.py`中的文件保存和清理逻辑
+  - 改进了`storage_service.py`中的文件路径管理
+  - 增强了`policy_service.py`中的数据处理逻辑
+
+#### 📋 修改文件列表
+本次更新涉及以下主要文件：
+- `backend/app/services/task_service.py` - 修复任务统计和文件清理逻辑
+- `backend/app/services/storage_service.py` - 修复文件路径和附件管理
+- `backend/app/models/policy.py` - 添加`task_id`字段支持
+- `backend/migrations/versions/006_add_policy_task_id.py` - 数据库迁移
+- 其他相关服务层和API层的优化
 
 ### v1.0.0 (2025-12-08) - 初始版本发布
 

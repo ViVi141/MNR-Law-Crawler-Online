@@ -168,10 +168,21 @@ def update_email_config(
     """更新邮件配置
     
     注意：如果启用邮件服务，必须至少配置一个收件人地址
+    配置更新后会自动重新加载，无需重启服务
     """
     try:
         config_dict = update.model_dump(exclude_unset=True)
         config = config_service.update_email_config(db, config_dict)
+        
+        # 通知邮件服务重新加载配置
+        try:
+            from ..services.email_service import get_email_service
+            email_service = get_email_service()
+            email_service.reload_config(db)
+            logger.info("邮件服务配置已实时更新")
+        except Exception as e:
+            logger.warning(f"通知邮件服务重新加载配置失败: {e}")
+        
         return EmailConfigResponse(**config)
     except ValueError as e:
         # 验证错误（如缺少收件人地址）

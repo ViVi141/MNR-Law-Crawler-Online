@@ -406,16 +406,30 @@ def download_task_files(
                 safe_title = "".join(c for c in policy_title if c.isalnum() or c in (' ', '-', '_', '(', ')', '（', '）'))[:100]
                 
                 for file_type in file_types:
-                    # 获取文件路径
-                    file_path = storage_service.get_policy_file_path(policy.id, file_type)
+                    # 获取文件路径（使用policy的task_id，确保文件路径正确）
+                    file_path = storage_service.get_policy_file_path(policy.id, file_type, task_id=policy.task_id)
                     
-                    # 如果启用了S3，文件应该从S3下载；如果没有S3且文件不存在，才生成
-                    if storage_service.s3_service.is_enabled():
-                        # 如果有S3，文件应该已经在S3中，get_policy_file_path会从S3下载到缓存
-                        if not file_path or not os.path.exists(file_path):
-                            logger.warning(f"政策 {policy.id} 的 {file_type} 文件在S3中不存在")
+                    # 如果文件不存在，先检查S3
+                    if not file_path or not os.path.exists(file_path):
+                        # 检查数据库中是否有S3路径
+                        s3_key = None
+                        if file_type == "markdown" and policy.markdown_s3_key:
+                            s3_key = policy.markdown_s3_key
+                        elif file_type == "docx" and policy.docx_s3_key:
+                            s3_key = policy.docx_s3_key
+                        
+                        # 如果启用了S3且有S3路径，尝试从S3下载
+                        if s3_key and storage_service.s3_service.is_enabled():
+                            file_path = storage_service.get_policy_file_path(policy.id, file_type, task_id=policy.task_id)
+                            if file_path and os.path.exists(file_path):
+                                # 使用从S3下载的文件
+                                pass
+                            else:
+                             logger.warning(f"政策 {policy.id} 的 {file_type} 文件在S3中不存在")
                             continue
-                    elif not file_path or not os.path.exists(file_path):
+                    
+                    # 如果还是没有文件，才重新生成
+                    if not file_path or not os.path.exists(file_path):
                         # 如果没有S3且文件不存在，才生成
                         logger.warning(f"政策 {policy.id} 的 {file_type} 文件不存在，尝试重新生成...")
                         try:
@@ -426,7 +440,9 @@ def download_task_files(
                             # 创建临时目录（基于policy_id，确保同一政策的文件可以被多个任务共享）
                             temp_base_dir = storage_service.local_dir / "temp_generated" / str(policy.id)
                             temp_base_dir.mkdir(parents=True, exist_ok=True)
-                            temp_file_path = temp_base_dir / f"{policy.id}.{file_type}"
+                            # 将文件类型转换为实际扩展名
+                            file_ext = "md" if file_type == "markdown" else file_type
+                            temp_file_path = temp_base_dir / f"{policy.id}.{file_ext}"
                             
                             # 如果文件已存在且未过期（1天内），直接使用
                             if temp_file_path.exists():
@@ -453,12 +469,13 @@ def download_task_files(
                                 # 注册临时文件，用于后续清理
                                 cleanup_service.register_temp_file(file_path)
                                 
-                                # 尝试保存到storage_service，这样可以被多个任务共享
+                                # 尝试保存到storage_service（使用policy的task_id，确保文件路径正确）
                                 try:
                                     storage_result = storage_service.save_policy_file(
                                         policy.id,
                                         file_type,
-                                        file_path
+                                        file_path,
+                                        task_id=policy.task_id
                                     )
                                     if storage_result.get("success"):
                                         # 如果保存成功，更新数据库中的路径
@@ -480,7 +497,9 @@ def download_task_files(
                     if file_path and os.path.exists(file_path):
                         # 构造ZIP内的文件路径
                         # 格式: 任务名称/文件格式/政策ID_标题.扩展名
-                        zip_path = f"{task.task_name}/{file_type}/{policy.id}_{safe_title}.{file_type}"
+                        # 将文件类型转换为实际扩展名
+                        file_ext = "md" if file_type == "markdown" else file_type
+                        zip_path = f"{task.task_name}/{file_type}/{policy.id}_{safe_title}.{file_ext}"
                         
                         # 添加到ZIP文件
                         zip_file.write(file_path, zip_path)

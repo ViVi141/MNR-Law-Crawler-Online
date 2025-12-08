@@ -26,7 +26,7 @@
           </el-select>
           <div style="font-size: 12px; color: #909399; margin-top: 5px;">
             <span v-if="selectedTaskId">当前显示该任务爬取的政策</span>
-            <span v-else style="color: #f56c6c;">请先选择任务以查看政策</span>
+            <span v-else>显示所有政策（可选择任务进行筛选）</span>
           </div>
         </el-form-item>
         <el-form-item label="关键词">
@@ -300,20 +300,14 @@ const handleReset = () => {
 }
 
 const fetchPolicies = async () => {
-  // 如果没有选择任务，不获取政策列表
-  if (!selectedTaskId.value) {
-    policies.value = []
-    pagination.total = 0
-    return
-  }
-  
+  // 移除强制要求选择任务的限制，允许查看所有政策
   loading.value = true
   try {
     const params: PolicySearchParams = {
       page: pagination.page,
       page_size: pagination.pageSize,
       ...searchForm,
-      task_id: selectedTaskId.value,
+      task_id: selectedTaskId.value || undefined,  // 可选，不选择任务时查看所有政策
     }
     const response = await policiesApi.getPolicies(params)
     policies.value = response.items

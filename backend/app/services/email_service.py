@@ -15,10 +15,49 @@ logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """邮件服务"""
+    """邮件服务（支持实时配置更新）"""
     
     def __init__(self):
         """初始化邮件服务"""
+        self._load_config()
+    
+    def _load_config(self, db: Optional[Any] = None):
+        """从数据库或settings加载配置（实时更新）"""
+        # 尝试从数据库加载配置
+        if db is None:
+            try:
+                from ..database import SessionLocal
+                db = SessionLocal()
+                try:
+                    from .config_service import ConfigService
+                    config_service = ConfigService()
+                    email_config = config_service.get_email_config(db, include_password=True)
+                    
+                    self.enabled = email_config.get("enabled", settings.email_enabled)
+                    self.smtp_host = email_config.get("smtp_host") or settings.email_smtp_host
+                    self.smtp_port = email_config.get("smtp_port") or settings.email_smtp_port
+                    self.smtp_user = email_config.get("smtp_user") or settings.email_smtp_user
+                    self.smtp_password = email_config.get("smtp_password") or settings.email_smtp_password
+                    self.from_address = email_config.get("from_address") or settings.email_from_address
+                    to_addresses_str = email_config.get("to_addresses", "[]")
+                    if isinstance(to_addresses_str, str):
+                        import json
+                        try:
+                            self.to_addresses = json.loads(to_addresses_str)
+                        except Exception:
+                            self.to_addresses = settings.email_to_addresses_list
+                    else:
+                        self.to_addresses = to_addresses_str or settings.email_to_addresses_list
+                    
+                    db.close()
+                    return
+                except Exception as e:
+                    logger.warning(f"从数据库加载邮件配置失败，使用默认配置: {e}")
+                    db.close()
+            except Exception as e:
+                logger.warning(f"无法连接数据库加载邮件配置，使用默认配置: {e}")
+        
+        # 从settings加载默认配置
         self.enabled = settings.email_enabled
         self.smtp_host = settings.email_smtp_host
         self.smtp_port = settings.email_smtp_port
@@ -27,16 +66,17 @@ class EmailService:
         self.from_address = settings.email_from_address
         self.to_addresses = settings.email_to_addresses_list
         
-        if not self.enabled:
-            logger.info("邮件服务已禁用")
-        elif not all([self.smtp_host, self.smtp_user, self.smtp_password, self.from_address]):
-            logger.warning("邮件服务配置不完整，服务未启用")
-            self.enabled = False
-        else:
-            logger.info(f"邮件服务初始化成功: {self.from_address}")
+    def reload_config(self, db: Optional[Any] = None):
+        """重新加载配置（用于配置更新后）"""
+        self._load_config(db)
+        logger.info("邮件服务配置已重新加载")
     
-    def is_enabled(self) -> bool:
-        """检查邮件服务是否启用且有收件人"""
+    def is_enabled(self, db: Optional[Any] = None) -> bool:
+        """检查邮件服务是否启用且有收件人（实时检查配置）"""
+        # 如果提供了db，重新加载配置
+        if db is not None:
+            self._load_config(db)
+        
         return self.enabled and all([
             self.smtp_host,
             self.smtp_user,
@@ -50,20 +90,26 @@ class EmailService:
         subject: str,
         body: str,
         to_addresses: Optional[List[str]] = None,
-        body_html: Optional[str] = None
+        body_html: Optional[str] = None,
+        db: Optional[Any] = None
     ) -> Dict[str, Any]:
-        """发送邮件
+        """发送邮件（支持实时配置更新）
         
         Args:
             subject: 邮件主题
             body: 邮件正文（纯文本）
             to_addresses: 收件人地址列表（如果为None，使用配置中的默认收件人）
             body_html: 邮件正文（HTML格式，可选）
+            db: 数据库会话（可选，如果提供则实时加载配置）
         
         Returns:
             发送结果字典
         """
-        if not self.is_enabled():
+        # 如果提供了db，重新加载配置以确保使用最新配置
+        if db is not None:
+            self._load_config(db)
+        
+        if not self.is_enabled(db):
             return {
                 "success": False,
                 "message": "邮件服务未启用或配置不完整"
@@ -139,9 +185,10 @@ class EmailService:
         error_message: Optional[str] = None,
         to_addresses: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
+        db: Optional[Any] = None
     ) -> Dict[str, Any]:
-        """发送任务完成通知
+        """发送任务完成通知（支持实时配置更新）
         
         Args:
             task_name: 任务名称
@@ -153,8 +200,9 @@ class EmailService:
             to_addresses: 收件人地址列表
             start_time: 开始时间
             end_time: 结束时间
+            db: 数据库会话（可选，如果提供则实时加载配置）
         """
-        if not self.is_enabled():
+        if not self.is_enabled(db):
             return {
                 "success": False,
                 "message": "邮件服务未启用或未配置收件人"
@@ -240,7 +288,7 @@ class EmailService:
 </html>
 """
         
-        return await self.send_email(subject, body, to_addresses, body_html)
+        return await self.send_email(subject, body, to_addresses, body_html, db)
     
     async def send_backup_notification(
         self,
@@ -251,9 +299,10 @@ class EmailService:
         error_message: Optional[str] = None,
         to_addresses: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None,
+        db: Optional[Any] = None
     ) -> Dict[str, Any]:
-        """发送备份完成通知
+        """发送备份完成通知（支持实时配置更新）
         
         Args:
             backup_type: 备份类型 (full/incremental)
@@ -264,8 +313,9 @@ class EmailService:
             to_addresses: 收件人地址列表
             start_time: 开始时间
             end_time: 结束时间
+            db: 数据库会话（可选，如果提供则实时加载配置）
         """
-        if not self.is_enabled():
+        if not self.is_enabled(db):
             return {
                 "success": False,
                 "message": "邮件服务未启用或未配置收件人"
@@ -332,7 +382,7 @@ class EmailService:
 </html>
 """
         
-        return await self.send_email(subject, body, to_addresses, body_html)
+        return await self.send_email(subject, body, to_addresses, body_html, db)
     
     async def send_system_notification(
         self,

@@ -159,3 +159,36 @@ class CacheService:
             logger.error(f"清空缓存时发生错误: {e}")
             return False
 
+    def get_attachment_cache_path(self, policy_id: int, attachment_filename: str) -> Path:
+        """获取附件缓存文件路径"""
+        return self.cache_dir / "policies" / str(policy_id) / "attachments" / attachment_filename
+    
+    def get_attachment_file(self, policy_id: int, attachment_filename: str) -> Optional[Path]:
+        """获取附件文件（优先从缓存读取）"""
+        if not self.is_enabled():
+            return None
+        
+        cache_path = self.get_attachment_cache_path(policy_id, attachment_filename)
+        
+        if cache_path.exists() and self._is_cache_valid(cache_path):
+            logger.debug(f"从缓存读取附件: {cache_path}")
+            return cache_path
+        
+        return None
+    
+    def cache_attachment_file(self, policy_id: int, attachment_filename: str, source_path: str) -> bool:
+        """缓存附件文件"""
+        if not self.is_enabled():
+            return False
+        
+        try:
+            cache_path = self.get_attachment_cache_path(policy_id, attachment_filename)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            shutil.copy2(source_path, cache_path)
+            logger.debug(f"附件已缓存: {cache_path}")
+            return True
+        except Exception as e:
+            logger.error(f"缓存附件失败: {e}")
+            return False
+
