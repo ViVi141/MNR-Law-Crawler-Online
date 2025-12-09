@@ -1,11 +1,15 @@
 #!/bin/sh
 # 不在开头使用 set -e，避免小错误导致容器退出
+# 启用调试模式，输出所有执行的命令
+set -x
+
+echo "=== docker-entrypoint-wrapper.sh 开始执行 ===" >&2
 
 # 生成随机字符串函数
 generate_random_string() {
     local length=$1
     python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits + '!@#%^&*()-_=+[]{}|;:,.<>?') for _ in range($length)))" 2>/dev/null || {
-        echo "错误: 无法生成随机密码，请检查 Python3 是否正确安装"
+        echo "错误: 无法生成随机密码，请检查 Python3 是否正确安装" >&2
         exit 1
     }
 }
@@ -21,8 +25,8 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
         POSTGRES_PASSWORD=$(cat "$PASSWORD_FILE" 2>/dev/null || echo "")
         if [ -n "$POSTGRES_PASSWORD" ]; then
             export POSTGRES_PASSWORD
-            echo "✅ [数据库] 从持久化文件读取已有密码（容器重启保持一致性）"
-            echo "🔑 [数据库] POSTGRES_PASSWORD 前缀: $(echo $POSTGRES_PASSWORD | cut -c1-10)..."
+            echo "✅ [数据库] 从持久化文件读取已有密码（容器重启保持一致性）" >&2
+            echo "🔑 [数据库] POSTGRES_PASSWORD 前缀: $(echo $POSTGRES_PASSWORD | cut -c1-10)..." >&2
         fi
     fi
     
@@ -30,8 +34,8 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
     if [ -z "$POSTGRES_PASSWORD" ]; then
         POSTGRES_PASSWORD=$(generate_random_string 32)
         export POSTGRES_PASSWORD
-        echo "✅ [数据库] 首次启动，已自动生成 POSTGRES_PASSWORD (32字符)"
-        echo "🔑 [数据库] POSTGRES_PASSWORD 前缀: $(echo $POSTGRES_PASSWORD | cut -c1-10)..."
+        echo "✅ [数据库] 首次启动，已自动生成 POSTGRES_PASSWORD (32字符)" >&2
+        echo "🔑 [数据库] POSTGRES_PASSWORD 前缀: $(echo $POSTGRES_PASSWORD | cut -c1-10)..." >&2
         
         # 保存密码到持久化文件（确保数据卷目录存在）
         # 注意：不在这里创建 PGDATA 目录，让 PostgreSQL 自己创建
@@ -41,12 +45,12 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
             mkdir -p "$PGDATA_DIR" 2>/dev/null || true
             if echo "$POSTGRES_PASSWORD" > "$PASSWORD_FILE" 2>/dev/null; then
                 chmod 600 "$PASSWORD_FILE" 2>/dev/null || true
-                echo "✅ [数据库] 已将密码保存到持久化文件: $PASSWORD_FILE"
+                echo "✅ [数据库] 已将密码保存到持久化文件: $PASSWORD_FILE" >&2
             else
-                echo "⚠️ 警告: 无法立即保存密码文件，将在 PostgreSQL 初始化后保存"
+                echo "⚠️ 警告: 无法立即保存密码文件，将在 PostgreSQL 初始化后保存" >&2
             fi
         else
-            echo "⚠️ 警告: 数据目录不存在，密码将在 PostgreSQL 初始化后保存"
+            echo "⚠️ 警告: 数据目录不存在，密码将在 PostgreSQL 初始化后保存" >&2
         fi
     fi
     
@@ -54,25 +58,28 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
     mkdir -p /run/secrets 2>/dev/null || true
     echo "$POSTGRES_PASSWORD" > /run/secrets/postgres_password 2>/dev/null || true
     chmod 644 /run/secrets/postgres_password 2>/dev/null || true
-    echo "✅ [数据库] 已将密码写入共享卷: /run/secrets/postgres_password"
+    echo "✅ [数据库] 已将密码写入共享卷: /run/secrets/postgres_password" >&2
 fi
+
+echo "=== 准备执行 PostgreSQL entrypoint ===" >&2
 
 # 执行原始的 PostgreSQL entrypoint（传递所有参数）
 # 在 postgres:18-alpine 中，entrypoint 通常在 /usr/local/bin/docker-entrypoint.sh
 # 如果不存在，尝试其他可能的位置
 if [ -f /usr/local/bin/docker-entrypoint.sh ]; then
+    echo "找到: /usr/local/bin/docker-entrypoint.sh" >&2
     exec /usr/local/bin/docker-entrypoint.sh "$@"
 elif [ -f /docker-entrypoint.sh ]; then
+    echo "找到: /docker-entrypoint.sh" >&2
     exec /docker-entrypoint.sh "$@"
 else
-    echo "❌ 错误: 无法找到 PostgreSQL 的 docker-entrypoint.sh"
-    echo "搜索常见位置..."
+    echo "搜索 docker-entrypoint.sh..." >&2
     ENTRYPOINT_PATH=$(find / -name "docker-entrypoint.sh" -type f 2>/dev/null | head -1)
     if [ -n "$ENTRYPOINT_PATH" ]; then
-        echo "找到: $ENTRYPOINT_PATH"
+        echo "找到: $ENTRYPOINT_PATH" >&2
         exec "$ENTRYPOINT_PATH" "$@"
     else
-        echo "未找到 docker-entrypoint.sh，尝试直接启动 postgres"
+        echo "❌ 错误: 未找到 docker-entrypoint.sh，尝试直接启动 postgres" >&2
         exec postgres "$@"
     fi
 fi
