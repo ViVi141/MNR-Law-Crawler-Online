@@ -1,24 +1,30 @@
 # 构建阶段 - 安装依赖
-FROM python:3.12.10-slim AS builder
+FROM python:3.14.0-slim AS builder
 
 WORKDIR /app
 
 # 配置 Debian 镜像源（强制使用清华大学镜像，确保生效）
-# Debian 12 使用新的 deb822 格式，需要同时处理 .sources 和 sources.list
+# 自动检测 Debian 版本以支持多个版本（Debian 11/12/13, Ubuntu 兼容）
 RUN set -e; \
+    # 检测 Debian 版本代号（支持 bookworm, bullseye, trixie 等） \
+    DEBIAN_VERSION=$(cat /etc/os-release 2>/dev/null | grep VERSION_CODENAME | cut -d= -f2 || echo "bookworm") || DEBIAN_VERSION="bookworm"; \
+    if [ -z "$DEBIAN_VERSION" ] || [ "$DEBIAN_VERSION" = "" ]; then \
+        DEBIAN_VERSION="bookworm"; \
+    fi; \
+    echo "检测到 Debian 版本: $DEBIAN_VERSION"; \
     # 备份原有配置 \
     mkdir -p /tmp/apt-backup || true; \
-    # 重命名 .sources 文件（避免新格式干扰） \
+    # 重命名 .sources 文件（避免新格式干扰，兼容 Debian 12+） \
     if [ -d /etc/apt/sources.list.d ]; then \
         for f in /etc/apt/sources.list.d/*.sources; do \
             [ -f "$f" ] && mv "$f" "/tmp/apt-backup/$(basename $f)" || true; \
         done 2>/dev/null || true; \
     fi; \
-    # 强制创建/覆盖 sources.list（确保使用镜像源） \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    echo "APT mirror configured: Tsinghua University" && \
+    # 强制创建/覆盖 sources.list（确保使用镜像源，兼容多个 Debian 版本） \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $DEBIAN_VERSION main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $DEBIAN_VERSION-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security $DEBIAN_VERSION-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "APT mirror configured: Tsinghua University (Debian $DEBIAN_VERSION)" && \
     echo "=== Current sources.list ===" && \
     cat /etc/apt/sources.list
 
@@ -47,7 +53,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel --timeout=300 --re
     pip install --no-cache-dir -r requirements.txt --timeout=300 --retries=5
 
 # 生产阶段
-FROM python:3.12.10-slim AS production
+FROM python:3.12-slim AS production
 
 WORKDIR /app
 
@@ -57,18 +63,24 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 RUN chmod -R 755 /usr/local/lib/python3.12/site-packages 2>/dev/null || true && \
     chmod -R 755 /usr/local/bin 2>/dev/null || true
 
-# 配置镜像源（生产阶段，强制使用镜像源）
+# 配置镜像源（生产阶段，强制使用镜像源，自动检测版本）
 RUN set -e; \
-    # 重命名 .sources 文件（避免新格式干扰） \
+    # 检测 Debian 版本代号 \
+    DEBIAN_VERSION=$(cat /etc/os-release 2>/dev/null | grep VERSION_CODENAME | cut -d= -f2 || echo "bookworm") || DEBIAN_VERSION="bookworm"; \
+    if [ -z "$DEBIAN_VERSION" ] || [ "$DEBIAN_VERSION" = "" ]; then \
+        DEBIAN_VERSION="bookworm"; \
+    fi; \
+    echo "检测到 Debian 版本: $DEBIAN_VERSION"; \
+    # 重命名 .sources 文件（避免新格式干扰，兼容 Debian 12+） \
     if [ -d /etc/apt/sources.list.d ]; then \
         for f in /etc/apt/sources.list.d/*.sources; do \
             [ -f "$f" ] && mv "$f" "$f.bak" || true; \
         done 2>/dev/null || true; \
     fi; \
-    # 强制覆盖 sources.list \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list || true
+    # 强制覆盖 sources.list（兼容多个 Debian 版本） \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $DEBIAN_VERSION main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $DEBIAN_VERSION-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security $DEBIAN_VERSION-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list || true
 
 # 安装运行时依赖（包括 LibreOffice 用于 DOC 转 DOCX）
 RUN apt-get update --fix-missing && \
