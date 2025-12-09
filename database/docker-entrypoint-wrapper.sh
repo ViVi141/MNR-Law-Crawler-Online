@@ -67,27 +67,47 @@ fi
 echo "=== 准备执行 PostgreSQL entrypoint ===" >&2
 
 # 检查数据目录：如果存在但不完整（缺少 PostgreSQL 版本文件），则清理
+# 注意：只在首次启动时清理，避免重复清理导致容器重启循环
 if [ -d "$PGDATA_DIR" ]; then
     if [ ! -f "$PGDATA_DIR/PG_VERSION" ]; then
         echo "⚠️ 警告: 数据目录存在但不完整，正在清理..." >&2
-        rm -rf "$PGDATA_DIR"/* "$PGDATA_DIR"/.* 2>/dev/null || true
+        # 只清理文件，保留目录结构，避免权限问题
+        find "$PGDATA_DIR" -mindepth 1 -maxdepth 1 ! -name "lost+found" -exec rm -rf {} + 2>/dev/null || true
         echo "✅ 数据目录已清理" >&2
+    else
+        echo "✅ 数据目录已存在且完整 (PG_VERSION: $(cat "$PGDATA_DIR/PG_VERSION" 2>/dev/null || echo 'unknown'))，跳过清理" >&2
     fi
+else
+    echo "ℹ️ 数据目录不存在，PostgreSQL 将进行初始化" >&2
 fi
 
 # 执行原始的 PostgreSQL entrypoint（传递所有参数）
 # 在 postgres:18-alpine 中，entrypoint 通常在 /usr/local/bin/docker-entrypoint.sh
 # 如果不存在，尝试其他可能的位置
+echo "🔍 查找 PostgreSQL entrypoint..." >&2
+echo "📋 传入参数: $*" >&2
+echo "📋 环境变量: POSTGRES_USER=${POSTGRES_USER:-postgres}, POSTGRES_DB=${POSTGRES_DB:-postgres}, PGDATA=${PGDATA:-/var/lib/postgresql/data}" >&2
+
+# 检查常见的 entrypoint 位置
 if [ -f /usr/local/bin/docker-entrypoint.sh ]; then
+    echo "✅ 找到 entrypoint: /usr/local/bin/docker-entrypoint.sh" >&2
+    echo "🚀 执行 PostgreSQL entrypoint..." >&2
     exec /usr/local/bin/docker-entrypoint.sh "$@"
 elif [ -f /docker-entrypoint.sh ]; then
+    echo "✅ 找到 entrypoint: /docker-entrypoint.sh" >&2
+    echo "🚀 执行 PostgreSQL entrypoint..." >&2
     exec /docker-entrypoint.sh "$@"
 else
-    ENTRYPOINT_PATH=$(find / -name "docker-entrypoint.sh" -type f 2>/dev/null | head -1)
-    if [ -n "$ENTRYPOINT_PATH" ]; then
+    # 搜索 entrypoint 文件
+    ENTRYPOINT_PATH=$(find /usr/local/bin /usr/bin /bin /docker-entrypoint-initdb.d / -name "docker-entrypoint.sh" -type f 2>/dev/null | grep -v wrapper | head -1)
+    if [ -n "$ENTRYPOINT_PATH" ] && [ -f "$ENTRYPOINT_PATH" ]; then
+        echo "✅ 找到 entrypoint: $ENTRYPOINT_PATH" >&2
+        echo "🚀 执行 PostgreSQL entrypoint..." >&2
         exec "$ENTRYPOINT_PATH" "$@"
     else
-        echo "❌ 错误: 未找到 docker-entrypoint.sh，尝试直接启动 postgres" >&2
+        echo "❌ 错误: 未找到 docker-entrypoint.sh" >&2
+        echo "📋 尝试直接启动 postgres..." >&2
+        echo "🚀 执行 postgres 命令..." >&2
         exec postgres "$@"
     fi
 fi
