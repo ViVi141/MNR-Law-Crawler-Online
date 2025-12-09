@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # 生成随机字符串函数
@@ -33,11 +33,16 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
     # 尝试从共享卷读取数据库自动生成的密码（最多等待10秒）
     max_attempts=10
     attempt=0
+    PASSWORD_READ=0
     while [ $attempt -lt $max_attempts ]; do
         if [ -f "/run/secrets/postgres_password" ]; then
-            export POSTGRES_PASSWORD=$(cat /run/secrets/postgres_password)
-            echo "✅ [后端] 已从数据库容器读取 POSTGRES_PASSWORD"
-            break
+            READ_PASSWORD=$(cat /run/secrets/postgres_password 2>/dev/null || echo "")
+            if [ -n "$READ_PASSWORD" ] && [ "$READ_PASSWORD" != "mnr_password" ]; then
+                export POSTGRES_PASSWORD="$READ_PASSWORD"
+                echo "✅ [后端] 已从数据库容器读取 POSTGRES_PASSWORD"
+                PASSWORD_READ=1
+                break
+            fi
         fi
         attempt=$((attempt + 1))
         if [ $attempt -lt $max_attempts ]; then
@@ -45,7 +50,7 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
         fi
     done
     
-    if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; then
+    if [ "$PASSWORD_READ" -eq 0 ]; then
         echo "⚠️  [后端] 无法从共享卷读取密码，等待数据库容器初始化..."
         echo "⚠️  [后端] 将使用环境变量中的默认值，如果数据库容器已生成密码，连接可能会失败"
         echo "⚠️  [后端] 建议：确保数据库容器已启动并生成密码后再启动后端容器"

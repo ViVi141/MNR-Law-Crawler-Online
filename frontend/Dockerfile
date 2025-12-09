@@ -27,7 +27,7 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 # 运行阶段 - 使用更小的nginx镜像
-FROM nginx:1.27-alpine
+FROM nginx:1.28-alpine
 
 # 配置 Alpine 镜像源（使用清华大学镜像，加速下载）
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
@@ -45,10 +45,17 @@ COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
 # 复制nginx配置
 COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
 
-# 创建必要的目录并设置权限
-RUN mkdir -p /var/cache/nginx /var/log/nginx /etc/nginx/conf.d && \
-    chown -R nginx:nginx /var/cache/nginx /var/log/nginx /usr/share/nginx/html && \
-    chmod -R 755 /usr/share/nginx/html
+# 创建自定义nginx主配置文件（覆盖默认配置，设置PID文件路径）
+RUN echo 'pid /var/cache/nginx/nginx.pid;' > /tmp/nginx_custom.conf && \
+    cat /etc/nginx/nginx.conf | grep -v "^pid " >> /tmp/nginx_custom.conf && \
+    mv /tmp/nginx_custom.conf /etc/nginx/nginx.conf && \
+    chown root:root /etc/nginx/nginx.conf
+
+# 创建必要的目录并设置权限（包括 /run 目录用于 PID 文件）
+RUN mkdir -p /var/cache/nginx /var/log/nginx /etc/nginx/conf.d /run && \
+    chown -R nginx:nginx /var/cache/nginx /var/log/nginx /usr/share/nginx/html /run && \
+    chmod -R 755 /usr/share/nginx/html && \
+    chmod 755 /run
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

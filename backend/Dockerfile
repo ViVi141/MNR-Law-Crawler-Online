@@ -42,17 +42,20 @@ COPY requirements.txt .
 # 配置 pip 镜像源（使用清华大学镜像，加速下载）
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple || true
 
-# 升级pip并安装Python依赖（使用缓存层优化，添加超时和重试）
+# 升级pip并安装Python依赖（安装到系统位置）
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel --timeout=300 --retries=5 && \
-    pip install --no-cache-dir --user -r requirements.txt --timeout=300 --retries=5
+    pip install --no-cache-dir -r requirements.txt --timeout=300 --retries=5
 
 # 生产阶段
 FROM python:3.12.10-slim AS production
 
 WORKDIR /app
 
-# 从构建阶段复制已安装的包
-COPY --from=builder /root/.local /root/.local
+# 从构建阶段复制已安装的包到系统位置（确保所有用户可访问）
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+RUN chmod -R 755 /usr/local/lib/python3.12/site-packages 2>/dev/null || true && \
+    chmod -R 755 /usr/local/bin 2>/dev/null || true
 
 # 配置镜像源（生产阶段，强制使用镜像源）
 RUN set -e; \
@@ -84,14 +87,18 @@ RUN useradd -m -u 1000 appuser && \
 # 复制应用代码
 COPY --chown=appuser:appuser . .
 
-# 复制并设置 entrypoint 脚本
-COPY --chown=appuser:appuser docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# 处理 entrypoint 脚本的 Windows CRLF 换行符问题（确保脚本可执行）
+RUN if [ -f /app/docker-entrypoint.sh ]; then \
+        tr -d '\r' < /app/docker-entrypoint.sh > /app/docker-entrypoint.sh.tmp && \
+        mv /app/docker-entrypoint.sh.tmp /app/docker-entrypoint.sh && \
+        chmod +x /app/docker-entrypoint.sh && \
+        chown appuser:appuser /app/docker-entrypoint.sh; \
+    fi
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    PATH=/root/.local/bin:$PATH \
+    PATH=/usr/local/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1
 
 # 切换到非root用户
@@ -111,7 +118,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 EXPOSE 8000
 
 # 启动命令
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 
 # 开发阶段（可选，用于开发环境）
 FROM production AS development
@@ -128,5 +135,5 @@ RUN apt-get update --fix-missing && \
 USER appuser
 
 # 开发模式使用reload
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 

@@ -113,7 +113,7 @@ MNR-Law-Crawler-Online/
 ├── env.example            # 环境变量配置示例
 ├── generate-env.ps1       # Windows环境变量生成脚本
 ├── generate_env.py        # Python环境变量生成脚本
-├── 启动项目.bat          # Windows启动脚本
+├── 快速启动.ps1          # Windows启动脚本
 ├── 数据流导图.md         # 数据流架构说明
 ├── 数据流图表-Mermaid.md # 可视化流程图
 └── README.md             # 本文档
@@ -136,7 +136,11 @@ docker-compose up -d --build
 # 3. 访问应用
 # 前端：http://localhost:3000
 # 后端API文档：http://localhost:8000/docs
-# 默认管理员：admin / admin123
+# 
+# 默认管理员账号：
+#   用户名：admin
+#   密码：admin123
+#   邮箱：admin@example.com
 ```
 
 #### ✨ Docker 自动配置特性
@@ -566,13 +570,13 @@ docker-compose build backend 2>&1 | tee backend-build.log
 ---
 
 **版本**: 3.0.0  
-**最后更新**: 2025-12-08  
+**最后更新**: 2025-12-09  
 **项目主页**: https://github.com/ViVi141/mnr-law-crawler-online  
 **原爬虫项目**: https://github.com/ViVi141/mnr-law-crawler
 
 ## 📝 更新日志
 
-### v3.0.0 (2025-12-08) - Docker优化与自动配置
+### v3.0.0 (2025-12-09) - Docker优化与自动配置
 
 #### 🎉 Docker 优化与自动化
 - ✨ **自动生成随机密钥**：容器启动时自动生成数据库密码和JWT密钥，无需手动配置
@@ -585,17 +589,25 @@ docker-compose build backend 2>&1 | tee backend-build.log
 - 🔄 **网络重试机制**：添加超时和重试配置，提高网络稳定性
 
 #### 🛠️ 技术改进
-- 📦 **后端Dockerfile优化**：多阶段构建，依赖缓存优化，非root用户
-- 🌐 **前端Dockerfile优化**：Nginx配置优化，静态资源缓存，Gzip压缩
-- 🗄️ **数据库Dockerfile优化**：zhparser构建优化，减小镜像体积
+- 📦 **后端Dockerfile优化**：多阶段构建，依赖缓存优化，非root用户，系统级包安装
+- 🌐 **前端Dockerfile优化**：Nginx 1.28配置优化，静态资源缓存，Gzip压缩，非root用户运行
+- 🗄️ **数据库Dockerfile优化**：移除中文分词依赖，简化配置，减小镜像体积
 - 📝 **环境变量管理**：支持`.env`文件，提供自动生成脚本
+- 🔧 **Entrypoint脚本优化**：修复Windows CRLF换行符问题，改进密码读取逻辑
 
 #### 📋 新增文件
 - `generate-env.ps1` - Windows环境变量生成脚本
 - `generate_env.py` - 跨平台环境变量生成脚本
 - `env.example` - 环境变量配置示例
 - `database/docker-entrypoint-wrapper.sh` - 数据库密码自动生成脚本
+- `database/save-password.sh` - 数据库密码持久化脚本
 - `backend/docker-entrypoint.sh` - 后端密钥自动生成脚本
+
+#### 🐛 Bug修复
+- 🔧 **修复Nginx配置错误**：移除重复的`keepalive_timeout`和`pid`指令
+- 🔧 **修复权限问题**：修复Nginx非root用户运行时的PID文件权限问题
+- 🔧 **修复后端uvicorn模块找不到**：改为系统级安装Python包，确保所有用户可访问
+- 🔧 **修复数据库初始化问题**：改进数据目录清理逻辑，避免初始化冲突
 
 ### v1.1.0 (2025-12-08) - BUG修复与系统优化
 

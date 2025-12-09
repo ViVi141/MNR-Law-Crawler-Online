@@ -13,6 +13,11 @@ RUN sed -i 's/\r$//' /tmp/docker-entrypoint-wrapper.sh && \
     mv /tmp/docker-entrypoint-wrapper.sh /usr/local/bin/docker-entrypoint-wrapper.sh && \
     chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh
 
+# 复制密码保存脚本（在数据库初始化后执行）
+COPY save-password.sh /docker-entrypoint-initdb.d/99-save-password.sh
+RUN sed -i 's/\r$//' /docker-entrypoint-initdb.d/99-save-password.sh && \
+    chmod +x /docker-entrypoint-initdb.d/99-save-password.sh
+
 # 设置执行权限并验证文件
 RUN [ -f /usr/local/bin/docker-entrypoint-wrapper.sh ] && \
     [ -x /usr/local/bin/docker-entrypoint-wrapper.sh ] && \

@@ -411,7 +411,116 @@ graph LR
     H --> I[应用到爬虫]
 ```
 
+## Docker 容器架构
+
+```mermaid
+graph TB
+    subgraph Docker["Docker Compose 编排"]
+        subgraph Frontend["前端容器 (Nginx 1.28)"]
+            F1[Nginx 1.28<br/>Port: 3000]
+            F2[静态文件<br/>/usr/share/nginx/html]
+            F1 --> F2
+        end
+        
+        subgraph Backend["后端容器 (FastAPI)"]
+            B1[FastAPI<br/>Port: 8000]
+            B2[Python 3.12<br/>uvicorn]
+            B3[Entrypoint Script<br/>密钥生成]
+            B3 --> B2
+            B2 --> B1
+        end
+        
+        subgraph Database["数据库容器 (PostgreSQL 18)"]
+            D1[PostgreSQL 18<br/>Port: 5432]
+            D2[Entrypoint Wrapper<br/>密码生成]
+            D3[Save Password Script<br/>密码持久化]
+            D2 --> D1
+            D1 --> D3
+        end
+        
+        subgraph Volumes["Docker Volumes"]
+            V1[postgres_data<br/>数据库数据]
+            V2[postgres_secrets<br/>密码共享卷]
+            V3[crawled_data<br/>爬取文件]
+            V4[cache_data<br/>缓存文件]
+            V5[logs_data<br/>日志文件]
+        end
+        
+        subgraph Networks["Docker Networks"]
+            N1[frontend-network<br/>前端网络]
+            N2[backend-network<br/>后端网络]
+        end
+    end
+    
+    F1 -->|HTTP代理| B1
+    B1 -->|SQL连接| D1
+    D1 --> V1
+    D2 --> V2
+    B3 -->|读取| V2
+    B1 --> V3
+    B1 --> V4
+    B1 --> V5
+    
+    F1 -.-> N1
+    B1 -.-> N2
+    D1 -.-> N2
+```
+
+## Docker 自动配置流程
+
+```mermaid
+sequenceDiagram
+    participant DC as Docker Compose
+    participant DB as 数据库容器
+    participant BE as 后端容器
+    participant FE as 前端容器
+    participant Vol as Docker Volumes
+    
+    DC->>DB: 启动数据库容器
+    DB->>DB: docker-entrypoint-wrapper.sh
+    alt 密码未设置或为默认值
+        DB->>Vol: 检查持久化密码文件
+        alt 文件存在
+            Vol-->>DB: 返回已有密码
+        else 文件不存在
+            DB->>DB: 生成32字符随机密码
+            DB->>Vol: 保存到持久化文件
+        end
+        DB->>Vol: 写入共享卷 /run/secrets/postgres_password
+    end
+    DB->>DB: PostgreSQL initdb
+    DB->>DB: save-password.sh 保存密码
+    DB-->>DC: 数据库就绪
+    
+    DC->>BE: 启动后端容器
+    BE->>BE: docker-entrypoint.sh
+    BE->>BE: 检查 JWT_SECRET_KEY
+    alt JWT密钥未设置或为默认值
+        BE->>Vol: 检查持久化密钥文件
+        alt 文件存在
+            Vol-->>BE: 返回已有密钥
+        else 文件不存在
+            BE->>BE: 生成128字符随机密钥
+            BE->>Vol: 保存到持久化文件
+        end
+    end
+    BE->>Vol: 从共享卷读取数据库密码
+    Vol-->>BE: 返回密码
+    BE->>BE: 更新 DATABASE_URL
+    BE->>DB: 连接数据库
+    DB-->>BE: 连接成功
+    BE-->>DC: 后端就绪
+    
+    DC->>FE: 启动前端容器
+    FE->>FE: Nginx 1.28 启动
+    FE->>BE: 代理请求到后端
+    BE-->>FE: 返回响应
+    FE-->>DC: 前端就绪
+```
+
 ---
 
-*这些图表展示了MNR Law Crawler系统的完整数据流。建议在支持Mermaid的Markdown查看器中查看以获得最佳可视化效果。*
+*最后更新: 2025-12-09*
+
+*这些图表展示了MNR Law Crawler系统的完整数据流和Docker容器架构。建议在支持Mermaid的Markdown查看器中查看以获得最佳可视化效果。*
 
