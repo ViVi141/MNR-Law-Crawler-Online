@@ -41,7 +41,10 @@ pypdf>=3.0.0
 
 # 可选依赖（文档转换）
 mammoth>=1.6.0
-poword>=0.0.17
+# poword>=0.0.17  # Windows 专用，依赖 pywin32（可选，Linux 环境下使用 LibreOffice）
+# 注意：
+# - Linux 环境：使用 LibreOffice 进行 DOC -> DOCX 转换（已在 Dockerfile 中安装）
+# - Windows 环境：可使用 poword 进行 DOC -> DOCX 转换（需要手动安装）
 
 # 中文分词（全文搜索）
 jieba>=0.42.1

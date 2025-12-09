@@ -67,11 +67,13 @@ RUN set -e; \
     echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
     echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list || true
 
-# 安装运行时依赖
+# 安装运行时依赖（包括 LibreOffice 用于 DOC 转 DOCX）
 RUN apt-get update --fix-missing && \
     apt-get install -y --no-install-recommends \
     postgresql-client \
     curl \
+    libreoffice \
+    libreoffice-writer \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

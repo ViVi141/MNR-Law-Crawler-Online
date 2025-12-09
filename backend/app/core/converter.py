@@ -3,6 +3,8 @@
 """
 
 import os
+import subprocess
+import shutil
 from typing import Optional
 
 # 检查依赖库
@@ -18,6 +20,23 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
+# 检查 LibreOffice（Linux 环境，优先使用）
+LIBREOFFICE_AVAILABLE = False
+if shutil.which('libreoffice'):
+    try:
+        # 验证 LibreOffice 是否可用
+        result = subprocess.run(
+            ['libreoffice', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            LIBREOFFICE_AVAILABLE = True
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        LIBREOFFICE_AVAILABLE = False
+
+# 检查 poword（Windows 环境，备用方案）
 try:
     from poword.api.word import doc2docx
     POWORD_AVAILABLE = True
@@ -203,7 +222,9 @@ class DocumentConverter:
             return None
     
     def doc_to_markdown(self, doc_path: str) -> Optional[str]:
-        """将DOC文件转换为Markdown（使用poword库）
+        """将DOC文件转换为Markdown
+        
+        优先使用 LibreOffice（Linux 环境），如果不可用则尝试 poword（Windows 环境）
         
         Args:
             doc_path: DOC文件路径
@@ -215,37 +236,91 @@ class DocumentConverter:
             print(f"    [X] 文件不存在: {doc_path}")
             return None
         
-        # 使用poword转换DOC -> DOCX -> Markdown
-        if not POWORD_AVAILABLE:
-            print("    [X] poword未安装，无法转换DOC文件")
-            print("    请安装: pip install poword")
-            return None
-        
-        try:
-            import tempfile
-            from poword.api.word import doc2docx
-            
-            with tempfile.TemporaryDirectory() as tmpdir:
-                output_name = 'converted.docx'
-                docx_path = os.path.join(tmpdir, output_name)
+        # 方法1: 使用 LibreOffice（Linux 环境，推荐）
+        if LIBREOFFICE_AVAILABLE:
+            try:
+                import tempfile
                 
-                # 使用poword将DOC转换为DOCX
-                doc2docx(doc_path, tmpdir, output_name)
-                
-                if os.path.exists(docx_path):
-                    # 将DOCX转换为Markdown
-                    content = self.docx_to_markdown(docx_path)
-                    if content:
-                        print("    [OK] 使用poword转换DOC成功")
-                        return content
-                    else:
-                        print("    [X] DOCX转换失败")
-                        return None
-                else:
-                    print("    [X] poword转换失败，未生成DOCX文件")
-                    return None
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    # 获取原文件名（不含扩展名）
+                    base_name = os.path.splitext(os.path.basename(doc_path))[0]
+                    output_docx = f"{base_name}.docx"
+                    output_path = os.path.join(tmpdir, output_docx)
                     
-        except Exception as e:
-            print(f"    [X] DOC转换失败: {e}")
-            return None
+                    # 使用 LibreOffice 转换为 DOCX（headless 模式，无界面）
+                    # --headless: 无界面模式
+                    # --convert-to docx: 转换为 DOCX 格式
+                    # --outdir: 输出目录
+                    result = subprocess.run(
+                        [
+                            'libreoffice',
+                            '--headless',
+                            '--convert-to', 'docx',
+                            '--outdir', tmpdir,
+                            doc_path
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=60  # 超时60秒
+                    )
+                    
+                    # LibreOffice 会将输出文件命名为原文件名（不含路径）
+                    output_docx_full = os.path.join(tmpdir, output_docx)
+                    
+                    if result.returncode == 0 and os.path.exists(output_docx_full):
+                        # 将DOCX转换为Markdown
+                        content = self.docx_to_markdown(output_docx_full)
+                        if content:
+                            print("    [OK] 使用 LibreOffice 转换DOC成功")
+                            return content
+                        else:
+                            print("    [X] DOCX转Markdown失败")
+                            return None
+                    else:
+                        error_msg = result.stderr if result.stderr else "未知错误"
+                        print(f"    [X] LibreOffice 转换失败: {error_msg}")
+                        # 继续尝试其他方法
+                        
+            except subprocess.TimeoutExpired:
+                print("    [X] LibreOffice 转换超时")
+            except Exception as e:
+                print(f"    [X] LibreOffice 转换异常: {e}")
+        
+        # 方法2: 使用 poword（Windows 环境，备用方案）
+        if POWORD_AVAILABLE:
+            try:
+                import tempfile
+                from poword.api.word import doc2docx
+                
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    output_name = 'converted.docx'
+                    docx_path = os.path.join(tmpdir, output_name)
+                    
+                    # 使用poword将DOC转换为DOCX
+                    doc2docx(doc_path, tmpdir, output_name)
+                    
+                    if os.path.exists(docx_path):
+                        # 将DOCX转换为Markdown
+                        content = self.docx_to_markdown(docx_path)
+                        if content:
+                            print("    [OK] 使用 poword 转换DOC成功")
+                            return content
+                        else:
+                            print("    [X] DOCX转Markdown失败")
+                            return None
+                    else:
+                        print("    [X] poword 转换失败，未生成DOCX文件")
+                        
+            except Exception as e:
+                print(f"    [X] poword 转换异常: {e}")
+        
+        # 所有方法都失败
+        if not LIBREOFFICE_AVAILABLE and not POWORD_AVAILABLE:
+            print("    [X] 无法转换DOC文件：未找到可用的转换工具")
+            print("    请安装 LibreOffice (Linux): apt-get install libreoffice")
+            print("    或安装 poword (Windows): pip install poword")
+        else:
+            print("    [X] 所有转换方法都失败了")
+        
+        return None
 
