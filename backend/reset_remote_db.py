@@ -85,7 +85,7 @@ def reset_remote_database(database_url: str):
         except Exception as e:
             logger.warning(f"清理索引时出错（可忽略）: {e}")
         
-        # 5. 初始化中文分词扩展（如果支持）
+        # 5. 初始化数据库扩展（如果支持）
         try:
             logger.info("初始化数据库扩展...")
             with engine.connect() as conn:
@@ -95,19 +95,6 @@ def reset_remote_database(database_url: str):
                     logger.info("pg_trgm 扩展已启用")
                 except Exception as e:
                     logger.warning(f"pg_trgm 扩展可能不支持: {e}")
-                
-                try:
-                    conn.execute(text('CREATE EXTENSION IF NOT EXISTS zhparser'))
-                    logger.info("zhparser 扩展已启用")
-                    
-                    # 创建中文全文搜索配置
-                    conn.execute(text('''
-                        CREATE TEXT SEARCH CONFIGURATION IF NOT EXISTS jiebacfg (PARSER = zhparser);
-                        ALTER TEXT SEARCH CONFIGURATION jiebacfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
-                    '''))
-                    logger.info("中文分词配置已创建")
-                except Exception as e:
-                    logger.warning(f"zhparser 扩展可能不支持: {e}")
                 
                 conn.commit()
         except Exception as e:

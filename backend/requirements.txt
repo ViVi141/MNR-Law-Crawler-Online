@@ -46,8 +46,7 @@ mammoth>=1.6.0
 # - Linux 环境：使用 LibreOffice 进行 DOC -> DOCX 转换（已在 Dockerfile 中安装）
 # - Windows 环境：可使用 poword 进行 DOC -> DOCX 转换（需要手动安装）
 
-# 中文分词（全文搜索）
-jieba>=0.42.1
+# 全文搜索使用 PostgreSQL 内置功能，无需额外依赖
 
 # 代理支持（可选）
 kdl>=0.2.21

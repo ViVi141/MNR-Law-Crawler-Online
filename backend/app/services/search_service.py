@@ -66,125 +66,18 @@ class SearchService:
         # 清理搜索词
         query = query.strip()
         
-        # 尝试使用PostgreSQL全文搜索，如果失败则降级到简单搜索
-        try:
-            # 使用PostgreSQL全文搜索（使用原始SQL）
-            # 对于中文分词，搜索词会被zhparser自动分词
-            # tsquery格式：对于中文，直接使用查询词，zhparser会自动分词
-            # 使用plainto_tsquery可以自动处理中文分词和AND逻辑
-            # 但我们先尝试简单的格式
-            tsquery_str = query  # zhparser会自动分词，不需要手动分割
-            
-            # 使用PostgreSQL的ts_rank进行相关性排序
-            # 构建完整SQL查询，包含相关性评分
-            # search_terms 已在上面定义
-            
-            # 构建WHERE条件
-            where_conditions = []
-            params = {"tsquery": tsquery_str}
-            
-            # 全文搜索条件（使用中文分词配置 jiebacfg）
-            # 使用 plainto_tsquery 自动处理中文分词，会将多个词自动用 AND 连接
-            where_conditions.append("""
-                to_tsvector('jiebacfg', 
-                    COALESCE(title, '') || ' ' || 
-                    COALESCE(content, '') || ' ' || 
-                    COALESCE(keywords, '')
-                ) @@ plainto_tsquery('jiebacfg', :tsquery)
-            """)
-            
-            # 添加其他筛选条件
-            if category:
-                where_conditions.append("category = :category")
-                params["category"] = category
-            if level:
-                where_conditions.append("level = :level")
-                params["level"] = level
-            if start_date:
-                where_conditions.append("pub_date >= :start_date")
-                params["start_date"] = start_date
-            if end_date:
-                where_conditions.append("pub_date <= :end_date")
-                params["end_date"] = end_date
-            
-            # 使用ts_rank计算相关性得分，按相关性降序，然后按日期降序
-            # 使用中文分词配置 jiebacfg
-            search_sql = text(f"""
-                SELECT policies.*,
-                    ts_rank(
-                        to_tsvector('jiebacfg', 
-                            COALESCE(policies.title, '') || ' ' || 
-                            COALESCE(policies.content, '') || ' ' || 
-                            COALESCE(policies.keywords, '')
-                        ),
-                        plainto_tsquery('jiebacfg', :tsquery)
-                    ) AS rank
-                FROM policies
-                WHERE {' AND '.join(where_conditions)}
-                ORDER BY rank DESC, pub_date DESC
-                LIMIT :limit OFFSET :skip
-            """)
-            
-            params["limit"] = limit
-            params["skip"] = skip
-            
-            # 执行查询
-            result_proxy = db.execute(search_sql.bindparams(**params))
-            
-            # 将结果转换为Policy对象
-            results = []
-            for row in result_proxy:
-                policy_dict = dict(row._mapping)
-                # 移除rank字段，它不是Policy模型的属性
-                policy_dict.pop('rank', None)
-                # 创建Policy对象
-                policy = Policy(**{k: v for k, v in policy_dict.items() if hasattr(Policy, k)})
-                results.append(policy)
-            
-        except Exception as e:
-            logger.warning(f"PostgreSQL全文搜索失败，降级到简单搜索: {e}")
-            # 降级到简单搜索
-            return self.search_simple(db, query, skip, limit)
-        
-        # 获取总数（需要单独的查询，因为带分页的count会有问题）
-        try:
-            # 使用原始SQL进行计数
-            # 对于中文分词，搜索词会被zhparser自动分词
-            tsquery_str = query  # zhparser会自动分词
-            
-            # 添加筛选条件到SQL（使用中文分词配置 jiebacfg）
-            # 使用 plainto_tsquery 自动处理中文分词和AND逻辑
-            conditions = ["to_tsvector('jiebacfg', COALESCE(title, '') || ' ' || COALESCE(content, '') || ' ' || COALESCE(keywords, '')) @@ plainto_tsquery('jiebacfg', :tsquery)"]
-            params = {"tsquery": tsquery_str}
-            
-            if category:
-                conditions.append("category = :category")
-                params["category"] = category
-            if level:
-                conditions.append("level = :level")
-                params["level"] = level
-            if start_date:
-                conditions.append("pub_date >= :start_date")
-                params["start_date"] = start_date
-            if end_date:
-                conditions.append("pub_date <= :end_date")
-                params["end_date"] = end_date
-            
-            count_sql = text(f"SELECT COUNT(*) FROM policies WHERE {' AND '.join(conditions)}").bindparams(**params)
-            
-            total = db.execute(count_sql).scalar() or 0
-            
-        except Exception as e:
-            logger.warning(f"获取搜索结果总数失败: {e}")
-            # 使用简单计数
-            keyword_pattern = f"%{query}%"
-            total = base_query.filter(
-                (Policy.title.ilike(keyword_pattern)) |
-                (Policy.content.ilike(keyword_pattern)) |
-                (Policy.keywords.ilike(keyword_pattern))
-            ).count()
-        
-        return results, total
+        # 使用简单搜索（LIKE 模式）
+        # 注意：已移除中文分词功能，使用 PostgreSQL 的 ILIKE 进行模糊搜索
+        return self.search_simple(
+            db=db,
+            query=query,
+            skip=skip,
+            limit=limit,
+            category=category,
+            level=level,
+            start_date=start_date,
+            end_date=end_date
+        )
     
     def search_simple(
         self,
@@ -197,9 +90,8 @@ class SearchService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ) -> Tuple[List[Policy], int]:
-        """简单全文搜索（降级方案）
+        """全文搜索（使用 LIKE 模糊匹配）
         
-        如果PostgreSQL全文搜索不可用，可以使用这个简化版本
         支持基本的LIKE搜索和筛选条件
         """
         # 构建基础查询
