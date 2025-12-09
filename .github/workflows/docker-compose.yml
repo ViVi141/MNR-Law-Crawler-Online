@@ -36,8 +36,10 @@ jobs:
       - name: Start services
         run: |
           docker-compose up -d
-          # 等待服务启动
-          sleep 30
+          # 等待数据库初始化完成（增加等待时间）
+          echo "等待数据库容器启动..."
+          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || echo "数据库可能仍在初始化中"
+          sleep 10
 
       - name: Check service health
         run: |

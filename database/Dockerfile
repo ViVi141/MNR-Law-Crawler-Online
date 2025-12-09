@@ -48,7 +48,7 @@ RUN chmod -R 755 /usr/local/share/postgresql/extension 2>/dev/null || true
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint-wrapper.sh"]
 
 # 设置健康检查（与 docker-compose.yml 保持一致）
-HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=5 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=10 \
     CMD pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres} || exit 1
 
 WORKDIR /

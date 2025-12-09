@@ -43,6 +43,10 @@ if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; the
     # 如果还是没有密码，生成新密码
     if [ -z "$POSTGRES_PASSWORD" ]; then
         POSTGRES_PASSWORD=$(generate_random_string 32)
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "❌ 错误: 无法生成随机密码，使用默认密码" >&2
+            POSTGRES_PASSWORD="mnr_password_$(date +%s | sha256sum | head -c 16)"
+        fi
         export POSTGRES_PASSWORD
         echo "✅ [数据库] 首次启动，已自动生成 POSTGRES_PASSWORD (32字符)" >&2
         echo "🔑 [数据库] POSTGRES_PASSWORD 前缀: $(echo $POSTGRES_PASSWORD | cut -c1-10)..." >&2
