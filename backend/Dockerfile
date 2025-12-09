@@ -1,5 +1,5 @@
 # 构建阶段 - 安装依赖
-FROM python:3.14.0-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 

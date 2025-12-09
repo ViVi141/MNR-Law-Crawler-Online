@@ -31,7 +31,9 @@ jobs:
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.2.4
-        if: ${{ secrets.SSH_HOST != '' }}
+        if: env.SSH_HOST != ''
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -45,7 +47,9 @@ jobs:
             docker-compose ps
 
       - name: Health check
-        if: ${{ secrets.SSH_HOST != '' }}
+        if: env.SSH_HOST != ''
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         uses: appleboy/ssh-action@v1.2.4
         with:
           host: ${{ secrets.SSH_HOST }}

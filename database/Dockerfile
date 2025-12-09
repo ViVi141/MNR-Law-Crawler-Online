@@ -4,8 +4,8 @@ FROM postgres:18-alpine
 # 配置 Alpine 镜像源（使用清华大学镜像，加速下载）
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 
-# 安装 Python3 用于生成随机密码
-RUN apk add --no-cache python3
+# 更新包索引并安装 Python3 用于生成随机密码
+RUN apk update && apk add --no-cache python3 py3-pip
 
 # 复制 entrypoint wrapper 脚本并确保使用 LF 换行符
 COPY docker-entrypoint-wrapper.sh /tmp/docker-entrypoint-wrapper.sh
