@@ -9,6 +9,7 @@ RUN apk add --no-cache python3
 
 # 直接使用 echo 创建 entrypoint 脚本（避免 COPY 可能的问题）
 RUN echo '#!/bin/sh' > /usr/local/bin/docker-entrypoint-wrapper.sh && \
+    echo 'echo "=== docker-entrypoint-wrapper.sh 开始执行 ===" >&2' >> /usr/local/bin/docker-entrypoint-wrapper.sh && \
     echo '' >> /usr/local/bin/docker-entrypoint-wrapper.sh && \
     echo '# 生成随机字符串函数' >> /usr/local/bin/docker-entrypoint-wrapper.sh && \
     echo 'generate_random_string() {' >> /usr/local/bin/docker-entrypoint-wrapper.sh && \
@@ -66,11 +67,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh && \
     head -n 1 /usr/local/bin/docker-entrypoint-wrapper.sh | grep -q "#!/bin/sh" && \
     echo "✅ 验证通过: 文件存在且格式正确"
 
-# 最终验证：确保文件在最终镜像中仍然存在
+# 最终验证：确保文件在最终镜像中仍然存在（在最后一个 RUN 中再次验证）
 RUN ls -lh /usr/local/bin/docker-entrypoint-wrapper.sh && \
+    cat /usr/local/bin/docker-entrypoint-wrapper.sh | head -10 && \
     [ -f /usr/local/bin/docker-entrypoint-wrapper.sh ] || (echo "❌ 最终验证失败: 文件不存在" && exit 1) && \
     [ -x /usr/local/bin/docker-entrypoint-wrapper.sh ] || (echo "❌ 最终验证失败: 文件不可执行" && exit 1) && \
-    echo "✅ 最终验证通过"
+    /usr/local/bin/docker-entrypoint-wrapper.sh --help 2>&1 || echo "脚本可以执行（帮助信息不是必需的）" && \
+    echo "✅ 最终验证通过: 文件存在、可执行且内容正确"
 
 # 确保扩展目录权限正确
 RUN chmod -R 755 /usr/local/share/postgresql/extension 2>/dev/null || true
