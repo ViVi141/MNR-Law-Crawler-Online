@@ -7,14 +7,17 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/re
 # 安装 Python3 用于生成随机密码
 RUN apk add --no-cache python3
 
-# 复制 entrypoint wrapper 脚本
-COPY docker-entrypoint-wrapper.sh /usr/local/bin/docker-entrypoint-wrapper.sh
+# 复制 entrypoint wrapper 脚本并确保使用 LF 换行符
+COPY docker-entrypoint-wrapper.sh /tmp/docker-entrypoint-wrapper.sh
+RUN sed -i 's/\r$//' /tmp/docker-entrypoint-wrapper.sh && \
+    mv /tmp/docker-entrypoint-wrapper.sh /usr/local/bin/docker-entrypoint-wrapper.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh
 
 # 设置执行权限并验证文件
-RUN chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh && \
-    [ -f /usr/local/bin/docker-entrypoint-wrapper.sh ] && \
+RUN [ -f /usr/local/bin/docker-entrypoint-wrapper.sh ] && \
     [ -x /usr/local/bin/docker-entrypoint-wrapper.sh ] && \
     head -n 1 /usr/local/bin/docker-entrypoint-wrapper.sh | grep -q "#!/bin/sh" && \
+    od -c /usr/local/bin/docker-entrypoint-wrapper.sh | head -1 && \
     echo "✅ 验证通过: 文件存在且格式正确"
 
 # 最终验证：确保文件在最终镜像中仍然存在
