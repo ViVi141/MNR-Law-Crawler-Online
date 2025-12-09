@@ -57,18 +57,77 @@ RUN set -e; \
     fi; \
     echo "========== 开始编译 scws =========="; \
     cd scws && \
-    ./autogen.sh && \
-    ./configure --prefix=/usr/local && \
-    make && \
-    make install && \
-    # 更新动态库缓存（Alpine 使用 ldconfig，路径可能不同） \
-    ldconfig /usr/local/lib 2>/dev/null || export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH || true && \
+    # 检查源码结构 \
+    echo "scws 源码目录结构:" && \
+    ls -la && \
+    echo "检查头文件位置:" && \
+    find . -name "*.h" 2>/dev/null | head -5 && \
+    ./autogen.sh || (echo "❌ autogen.sh 失败" && exit 1) && \
+    ./configure --prefix=/usr/local || (echo "❌ configure 失败" && exit 1) && \
+    make || (echo "❌ make 失败" && exit 1) && \
+    # 安装前检查构建产物 \
+    echo "构建产物检查:" && \
+    find . -name "libscws*" -o -name "*.h" 2>/dev/null | head -10 && \
+    make install || (echo "❌ make install 失败" && exit 1) && \
     cd /tmp && \
-    rm -rf scws && \
-    echo "========== scws 安装完成 ==========" && \
+    # 更新动态库缓存 \
+    ldconfig /usr/local/lib 2>/dev/null || true && \
+    echo "" && \
     echo "========== 验证 scws 安装 ==========" && \
-    ls -la /usr/local/include/scws* 2>/dev/null || echo "警告: scws 头文件路径可能不正确" && \
-    ls -la /usr/local/lib/libscws* 2>/dev/null || echo "警告: scws 库文件路径可能不正确"
+    echo "查找所有 scws 相关文件 (包括子目录):" && \
+    find /usr/local -name "*scws*" -o -path "*/scws/*" 2>/dev/null | head -20 || echo "未找到文件" && \
+    echo "" && \
+    echo "查找 scws 头文件 (所有位置):" && \
+    find /usr/local/include -type f -name "*scws*.h" 2>/dev/null || echo "未找到头文件" && \
+    find /usr/local/include -type d -name "*scws*" 2>/dev/null || echo "未找到头文件目录" && \
+    echo "" && \
+    echo "查找 scws 库文件:" && \
+    find /usr/local/lib -name "*scws*" 2>/dev/null || echo "未找到库文件" && \
+    echo "" && \
+    echo "检查 /usr/local/include 目录内容:" && \
+    ls -la /usr/local/include/ 2>/dev/null | head -10 || true && \
+    echo "" && \
+    # 查找 scws.h 的实际位置（可能在多个位置） \
+    SCWS_H_FILE=$(find /usr/local/include -type f -name "scws.h" 2>/dev/null | head -1) && \
+    if [ -z "$SCWS_H_FILE" ]; then \
+        # 尝试查找 scws 目录下的头文件 \
+        SCWS_DIR=$(find /usr/local/include -type d -name "scws" 2>/dev/null | head -1) && \
+        if [ -n "$SCWS_DIR" ] && [ -f "$SCWS_DIR/scws.h" ]; then \
+            SCWS_H_FILE="$SCWS_DIR/scws.h"; \
+            echo "在子目录找到: $SCWS_H_FILE"; \
+        fi; \
+    fi && \
+    if [ -z "$SCWS_H_FILE" ]; then \
+        echo "❌ 错误: 未找到 scws.h 头文件，scws 安装失败"; \
+        echo "检查 /usr/local 目录结构:"; \
+        ls -la /usr/local/ 2>/dev/null || true; \
+        ls -la /usr/local/include/ 2>/dev/null || true; \
+        exit 1; \
+    else \
+        echo "✓ 找到 scws.h: $SCWS_H_FILE"; \
+        # 如果不在根目录，创建符号链接 \
+        if [ "$SCWS_H_FILE" != "/usr/local/include/scws.h" ]; then \
+            echo "创建符号链接: $SCWS_H_FILE -> /usr/local/include/scws.h"; \
+            ln -sf "$SCWS_H_FILE" /usr/local/include/scws.h; \
+        fi; \
+        # 验证符号链接或文件是否存在 \
+        if [ -f /usr/local/include/scws.h ] || [ -L /usr/local/include/scws.h ]; then \
+            echo "✓ scws.h 在 /usr/local/include/scws.h 可用"; \
+        else \
+            echo "❌ 错误: scws.h 符号链接创建失败"; \
+            exit 1; \
+        fi; \
+    fi && \
+    # 验证 scws 库文件 \
+    SCWS_LIB=$(find /usr/local/lib -name "libscws.so*" -o -name "libscws.a" 2>/dev/null | head -1) && \
+    if [ -z "$SCWS_LIB" ]; then \
+        echo "❌ 错误: 未找到 scws 库文件，scws 安装失败"; \
+        exit 1; \
+    else \
+        echo "✓ 找到 scws 库: $SCWS_LIB"; \
+    fi && \
+    echo "========== scws 安装完成 ==========" && \
+    rm -rf scws
 
 # 下载并编译安装 zhparser（使用多个备用方案，按优先级尝试）
 RUN set -e; \
@@ -115,14 +174,33 @@ RUN set -e; \
     # 确保能找到 scws 的头文件和库文件（在同一shell会话中） \
     export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH && \
     export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && \
-    export C_INCLUDE_PATH=/usr/local/include:$C_INCLUDE_PATH && \
-    export CPLUS_INCLUDE_PATH=/usr/local/include:$CPLUS_INCLUDE_PATH && \
+    # scws 头文件可能在子目录中，添加多个可能的路径 \
+    export C_INCLUDE_PATH=/usr/local/include:/usr/local/include/scws:$C_INCLUDE_PATH && \
+    export CPLUS_INCLUDE_PATH=/usr/local/include:/usr/local/include/scws:$CPLUS_INCLUDE_PATH && \
+    # 验证 scws 文件位置 \
     echo "库路径: $LD_LIBRARY_PATH" && \
     echo "头文件路径: $C_INCLUDE_PATH" && \
-    ls -la /usr/local/include/scws* 2>/dev/null || echo "警告: 检查 scws 头文件" && \
-    ls -la /usr/local/lib/libscws* 2>/dev/null || echo "警告: 检查 scws 库文件" && \
-    make && \
-    make install && \
+    echo "查找 scws 头文件:" && \
+    find /usr/local/include -name "*scws*.h" 2>/dev/null | head -3 && \
+    echo "查找 scws 库文件:" && \
+    find /usr/local/lib -name "*scws*" 2>/dev/null | head -3 && \
+    # 如果 scws.h 在子目录中，创建符号链接 \
+    if [ ! -f /usr/local/include/scws.h ]; then \
+        SCWS_H=$(find /usr/local/include -name "scws.h" 2>/dev/null | head -1); \
+        if [ -n "$SCWS_H" ]; then \
+            echo "创建符号链接: $SCWS_H -> /usr/local/include/scws.h"; \
+            ln -sf "$SCWS_H" /usr/local/include/scws.h; \
+        fi; \
+    fi && \
+    # 验证 scws.h 是否存在 \
+    if [ ! -f /usr/local/include/scws.h ]; then \
+        echo "错误: 无法找到 scws.h 头文件"; \
+        exit 1; \
+    fi && \
+    echo "确认 scws.h 存在: /usr/local/include/scws.h" && \
+    # 编译 zhparser \
+    make PG_CONFIG=/usr/local/bin/pg_config && \
+    make install PG_CONFIG=/usr/local/bin/pg_config && \
     cd /tmp && \
     rm -rf zhparser && \
     echo "========== zhparser 安装完成 =========="
