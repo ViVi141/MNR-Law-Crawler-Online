@@ -15,7 +15,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mnr_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mnr_password}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-      PGDATA: /var/lib/postgresql/data/pgdata
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - postgres_secrets:/run/secrets

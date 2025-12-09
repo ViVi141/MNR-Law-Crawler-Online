@@ -15,8 +15,9 @@ generate_random_string() {
 }
 
 # 密码持久化路径（保存在数据卷中，确保重启后不丢失）
+# 注意：使用 PGDATA 的父目录来保存密码文件，避免权限问题
 PGDATA_DIR="${PGDATA:-/var/lib/postgresql/data}"
-PASSWORD_FILE="$PGDATA_DIR/.postgres_password"
+PASSWORD_FILE="/var/lib/postgresql/.postgres_password"
 
 # 如果没有设置 POSTGRES_PASSWORD 或者是默认值
 if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "mnr_password" ]; then
