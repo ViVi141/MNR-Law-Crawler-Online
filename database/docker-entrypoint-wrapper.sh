@@ -66,14 +66,23 @@ fi
 
 echo "=== 准备执行 PostgreSQL entrypoint ===" >&2
 
-# 检查数据目录：如果存在但不完整（缺少 PostgreSQL 版本文件），则清理
-# 注意：只在首次启动时清理，避免重复清理导致容器重启循环
+INIT_CLEANED_FLAG="/run/.pgdata_cleaned"
+mkdir -p "$PGDATA_DIR" 2>/dev/null || true
+# 尝试修正权限（如卷为 root 拥有会导致 initdb 失败），失败也不中断
+chown -R postgres:postgres "$PGDATA_DIR" 2>/dev/null || true
+
+# 检查数据目录：如果存在但不完整（缺少 PG_VERSION），最多清理一次，避免无限循环
 if [ -d "$PGDATA_DIR" ]; then
     if [ ! -f "$PGDATA_DIR/PG_VERSION" ]; then
-        echo "⚠️ 警告: 数据目录存在但不完整，正在清理..." >&2
-        # 只清理文件，保留目录结构，避免权限问题
-        find "$PGDATA_DIR" -mindepth 1 -maxdepth 1 ! -name "lost+found" -exec rm -rf {} + 2>/dev/null || true
-        echo "✅ 数据目录已清理" >&2
+        if [ ! -f "$INIT_CLEANED_FLAG" ]; then
+            echo "⚠️ 警告: 数据目录存在但不完整，正在清理..." >&2
+            find "$PGDATA_DIR" -mindepth 1 -maxdepth 1 ! -name "lost+found" -exec rm -rf {} + 2>/dev/null || true
+            touch "$INIT_CLEANED_FLAG"
+            echo "✅ 数据目录已清理（标记已记录，避免重复清理）" >&2
+        else
+            echo "⚠️ 检测到 PG_VERSION 缺失且已清理过，跳过再次清理，交由官方 entrypoint 处理。" >&2
+            ls -la "$PGDATA_DIR" 2>/dev/null || true
+        fi
     else
         echo "✅ 数据目录已存在且完整 (PG_VERSION: $(cat "$PGDATA_DIR/PG_VERSION" 2>/dev/null || echo 'unknown'))，跳过清理" >&2
     fi

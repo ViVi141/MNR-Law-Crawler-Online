@@ -47,6 +47,9 @@ RUN chmod -R 755 /usr/local/share/postgresql/extension 2>/dev/null || true
 # 设置 entrypoint
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint-wrapper.sh"]
 
+# 默认启动 postgres（显式指定，避免 CMD 为空导致容器退出）
+CMD ["postgres"]
+
 # 设置健康检查（与 docker-compose.yml 保持一致）
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=10 \
     CMD pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres} || exit 1

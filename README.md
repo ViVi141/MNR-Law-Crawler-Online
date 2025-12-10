@@ -573,7 +573,7 @@ docker-compose build backend 2>&1 | tee backend-build.log
 ---
 
 **版本**: 3.0.0  
-**最后更新**: 2025-12-09  
+**最后更新**: 2025-12-10  
 **项目主页**: https://github.com/ViVi141/mnr-law-crawler-online  
 **原爬虫项目**: https://github.com/ViVi141/mnr-law-crawler
 
@@ -741,6 +741,12 @@ docker pull ghcr.io/vivi141/mnr-law-crawler-online-db:latest
 # 或使用特定版本
 docker pull ghcr.io/vivi141/mnr-law-crawler-online-backend:v3.0.0
 ```
+
+### GitHub 自动发布与部署
+
+- 创建 Release 时，GitHub Actions 会自动构建并推送后端、前端、数据库镜像到 GHCR（标签与 Release 版本一致，并附带 latest）。
+- 可在服务器上直接拉取指定版本镜像并通过 `docker-compose pull && docker-compose up -d` 完成滚动更新（先确保 `.env` 已配置好数据库和 JWT 等密钥）。
+- CI 同步包含安全扫描、构建校验和健康检查，确保发布镜像可直接用于生产部署。
 
 ## 📞 支持
 
