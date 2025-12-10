@@ -35,29 +35,87 @@ jobs:
 
       - name: Start services
         run: |
+          echo "=== 启动所有服务 ==="
           docker-compose up -d
-          # 等待数据库初始化完成（增加等待时间）
-          echo "等待数据库容器启动..."
-          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || echo "数据库可能仍在初始化中"
-          sleep 10
+          
+          echo "=== 等待数据库容器启动 ==="
+          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker-compose logs db && exit 1)
+          
+          echo "=== 等待后端容器启动 ==="
+          timeout 120 bash -c 'until docker-compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker-compose logs backend && exit 1)
+          
+          echo "=== 等待前端容器启动 ==="
+          timeout 60 bash -c 'until docker-compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker-compose logs frontend && exit 1)
+          
+          echo "=== 等待服务完全就绪 ==="
+          sleep 15
 
       - name: Check service health
         run: |
-          # 检查数据库健康状态
-          docker-compose ps db | grep -q "healthy" || exit 1
+          echo "=== 检查容器状态 ==="
+          docker-compose ps
           
-          # 检查后端健康状态
-          timeout 60 bash -c 'until curl -f http://localhost:8000/api/health; do sleep 2; done' || exit 1
+          echo "=== 检查数据库健康状态 ==="
+          docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
           
-          # 检查前端健康状态
-          timeout 60 bash -c 'until curl -f http://localhost:3000/health; do sleep 2; done' || exit 1
+          echo "=== 检查后端健康状态（通过容器内部） ==="
+          # 后端端口不暴露，通过容器内部访问
+          timeout 120 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
+          
+          echo "=== 检查前端健康状态 ==="
+          # 前端绑定到 127.0.0.1:3000，使用 localhost 访问
+          timeout 60 bash -c 'until curl -f http://127.0.0.1:3000/health; do sleep 2; echo "等待前端启动..."; done' || (echo "前端健康检查失败" && exit 1)
+          
+          echo "=== 检查前端访问后端 API（通过 Nginx 代理） ==="
+          # 通过前端 Nginx 代理访问后端 API
+          timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/api/health; do sleep 2; echo "等待 API 代理就绪..."; done' || (echo "API 代理检查失败" && exit 1)
+          
+          echo "✅ 所有服务健康检查通过"
 
       - name: View logs
         if: failure()
         run: |
-          docker-compose logs
+          echo "=== 数据库日志 ==="
+          docker-compose logs db --tail=50
+          echo ""
+          echo "=== 后端日志 ==="
+          docker-compose logs backend --tail=50
+          echo ""
+          echo "=== 前端日志 ==="
+          docker-compose logs frontend --tail=50
+          echo ""
+          echo "=== 所有容器状态 ==="
+          docker-compose ps -a
+
+      - name: Run integration tests
+        run: |
+          echo "=== 运行集成测试 ==="
+          
+          # 测试前端页面
+          echo "测试前端首页..."
+          curl -f http://127.0.0.1:3000/ | grep -q "html" || echo "警告: 前端首页可能未正确加载"
+          
+          # 测试后端 API（通过前端代理）
+          echo "测试后端健康检查 API..."
+          response=$(curl -s http://127.0.0.1:3000/api/health)
+          echo "响应: $response"
+          echo "$response" | grep -q "healthy" || (echo "后端健康检查失败" && exit 1)
+          
+          # 测试后端 API（直接通过容器）
+          echo "测试后端 API（容器内部）..."
+          docker-compose exec -T backend python -c "
+          import urllib.request
+          import json
+          response = urllib.request.urlopen('http://localhost:8000/api/health')
+          data = json.loads(response.read().decode())
+          assert data.get('status') == 'healthy', '健康检查失败'
+          print('✅ 后端健康检查通过')
+          " || exit 1
+          
+          echo "✅ 所有集成测试通过"
 
       - name: Stop services
         if: always()
         run: |
+          echo "=== 停止所有服务 ==="
           docker-compose down -v

@@ -57,8 +57,25 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || '22' }}
           script: |
-            # 等待服务启动
-            sleep 10
-            # 检查服务健康状态
-            curl -f http://localhost:8000/api/health || exit 1
-            curl -f http://localhost:3000/health || exit 1
+            echo "=== 等待服务启动 ==="
+            sleep 15
+            
+            echo "=== 检查容器状态 ==="
+            docker-compose ps
+            
+            echo "=== 检查数据库健康状态 ==="
+            docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
+            
+            echo "=== 检查后端健康状态（通过容器内部） ==="
+            # 后端端口不暴露，通过容器内部访问
+            timeout 60 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && docker-compose logs backend --tail=30 && exit 1)
+            
+            echo "=== 检查前端健康状态 ==="
+            # 前端绑定到 127.0.0.1:3000
+            timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/health; do sleep 2; echo "等待前端启动..."; done' || (echo "前端健康检查失败" && docker-compose logs frontend --tail=30 && exit 1)
+            
+            echo "=== 检查前端访问后端 API（通过 Nginx 代理） ==="
+            # 通过前端 Nginx 代理访问后端 API
+            timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/api/health; do sleep 2; echo "等待 API 代理就绪..."; done' || (echo "API 代理检查失败" && exit 1)
+            
+            echo "✅ 所有服务健康检查通过"

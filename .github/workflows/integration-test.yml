@@ -1,0 +1,170 @@
+name: Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  docker-compose-integration:
+    name: Docker Compose Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
+      - name: Build services
+        run: |
+          echo "=== 构建所有服务 ==="
+          docker-compose build --parallel --progress=plain
+
+      - name: Start services
+        run: |
+          echo "=== 启动所有服务 ==="
+          docker-compose up -d
+          
+          echo "=== 等待数据库容器启动 ==="
+          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker-compose logs db && exit 1)
+          
+          echo "=== 等待后端容器启动 ==="
+          timeout 120 bash -c 'until docker-compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker-compose logs backend && exit 1)
+          
+          echo "=== 等待前端容器启动 ==="
+          timeout 60 bash -c 'until docker-compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker-compose logs frontend && exit 1)
+          
+          echo "=== 等待服务完全就绪 ==="
+          sleep 15
+
+      - name: Verify container network isolation
+        run: |
+          echo "=== 验证网络隔离 ==="
+          
+          # 检查网络配置
+          docker network inspect mnr-crawler-app | grep -q "mnr-crawler-db" || exit 1
+          docker network inspect mnr-crawler-app | grep -q "mnr-crawler-backend" || exit 1
+          docker network inspect mnr-crawler-app | grep -q "mnr-crawler-frontend" || exit 1
+          
+          echo "✅ 所有容器在同一网络中"
+          
+          # 验证端口暴露情况
+          echo "检查端口暴露..."
+          docker port mnr-crawler-db | grep -q "5432" && echo "❌ 数据库端口不应暴露" && exit 1 || echo "✅ 数据库端口未暴露"
+          docker port mnr-crawler-backend | grep -q "8000" && echo "❌ 后端端口不应暴露" && exit 1 || echo "✅ 后端端口未暴露"
+          docker port mnr-crawler-frontend | grep -q "3000" || (echo "❌ 前端端口未暴露" && exit 1)
+          docker port mnr-crawler-frontend | grep -q "127.0.0.1:3000" || echo "⚠️ 前端端口未绑定到 localhost"
+          
+          echo "✅ 端口配置正确"
+
+      - name: Run health checks
+        run: |
+          echo "=== 运行健康检查 ==="
+          
+          # 检查数据库健康状态
+          echo "检查数据库..."
+          docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
+          
+          # 检查后端健康状态（通过容器内部）
+          echo "检查后端（容器内部）..."
+          timeout 120 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
+          
+          # 检查前端健康状态
+          echo "检查前端..."
+          timeout 60 bash -c 'until curl -f http://127.0.0.1:3000/health; do sleep 2; echo "等待前端启动..."; done' || (echo "前端健康检查失败" && exit 1)
+          
+          # 检查前端访问后端 API（通过 Nginx 代理）
+          echo "检查 API 代理..."
+          timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/api/health; do sleep 2; echo "等待 API 代理就绪..."; done' || (echo "API 代理检查失败" && exit 1)
+          
+          echo "✅ 所有健康检查通过"
+
+      - name: Run API tests
+        run: |
+          echo "=== 运行 API 测试 ==="
+          
+          # 测试健康检查端点
+          echo "测试 /api/health..."
+          response=$(curl -s http://127.0.0.1:3000/api/health)
+          echo "响应: $response"
+          echo "$response" | grep -q "healthy" || (echo "健康检查失败" && exit 1)
+          
+          # 测试根端点
+          echo "测试 /api..."
+          response=$(curl -s http://127.0.0.1:3000/api/health)
+          [ -n "$response" ] || (echo "API 无响应" && exit 1)
+          
+          echo "✅ API 测试通过"
+
+      - name: Test frontend
+        run: |
+          echo "=== 测试前端 ==="
+          
+          # 测试前端首页
+          echo "测试前端首页..."
+          response=$(curl -s http://127.0.0.1:3000/)
+          echo "$response" | grep -q "html\|<!DOCTYPE" || echo "⚠️ 前端首页可能未正确加载"
+          
+          # 测试前端静态资源
+          echo "测试静态资源..."
+          curl -f http://127.0.0.1:3000/health || echo "⚠️ 健康检查端点可能不存在"
+          
+          echo "✅ 前端测试完成"
+
+      - name: Test database connectivity
+        run: |
+          echo "=== 测试数据库连接 ==="
+          
+          # 从后端容器测试数据库连接
+          docker-compose exec -T backend python -c "
+          from app.database import engine
+          from sqlalchemy import text
+          with engine.connect() as conn:
+              result = conn.execute(text('SELECT 1'))
+              assert result.fetchone()[0] == 1
+              print('✅ 数据库连接正常')
+          " || (echo "数据库连接失败" && exit 1)
+          
+          echo "✅ 数据库连接测试通过"
+
+      - name: View logs on failure
+        if: failure()
+        run: |
+          echo "=== 数据库日志 ==="
+          docker-compose logs db --tail=50
+          echo ""
+          echo "=== 后端日志 ==="
+          docker-compose logs backend --tail=50
+          echo ""
+          echo "=== 前端日志 ==="
+          docker-compose logs frontend --tail=50
+          echo ""
+          echo "=== 所有容器状态 ==="
+          docker-compose ps -a
+          echo ""
+          echo "=== 网络信息 ==="
+          docker network inspect mnr-crawler-app || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "=== 清理资源 ==="
+          docker-compose down -v
+          docker system prune -f
+
