@@ -160,4 +160,9 @@ networks:
     name: mnr-crawler-app
     driver: bridge
     internal: false  # 允许容器访问外网（前端需要访问外部资源，后端可能需要访问外部API）
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16  # 指定子网，避免冲突
+    attachable: true  # 允许外部容器附加到此网络
 
