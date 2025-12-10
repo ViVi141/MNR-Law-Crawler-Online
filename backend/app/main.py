@@ -34,11 +34,18 @@ async def lifespan(app: FastAPI):
             User, Policy, Task, TaskPolicy, Attachment,
             ScheduledTask, ScheduledTaskRun, SystemConfig, BackupRecord
         )
-        Base.metadata.create_all(bind=engine)
+        # 使用 checkfirst=True 检查表是否存在，避免重复创建
+        # 如果表已存在，不会报错
+        Base.metadata.create_all(bind=engine, checkfirst=True)
         logger.info("数据库表检查完成")
     except Exception as e:
-        logger.error(f"数据库表检查失败: {e}")
-        logger.exception(e)
+        # 如果是表已存在的错误，可以忽略
+        error_msg = str(e)
+        if "already exists" in error_msg or "duplicate key" in error_msg.lower():
+            logger.warning(f"数据库表可能已存在，跳过创建: {error_msg}")
+        else:
+            logger.error(f"数据库表检查失败: {e}")
+            logger.exception(e)
     
     # 创建默认用户（如果不存在）
     try:
@@ -59,10 +66,20 @@ async def lifespan(app: FastAPI):
                     email="admin@example.com"
                 )
                 logger.info("创建默认用户: admin/admin123")
+            else:
+                logger.info(f"数据库中已有 {user_count} 个用户，跳过创建默认用户")
+        except Exception as db_error:
+            # 如果是用户已存在的错误，可以忽略
+            error_msg = str(db_error)
+            if "already exists" in error_msg or "duplicate key" in error_msg.lower():
+                logger.info("默认用户已存在，跳过创建")
+            else:
+                logger.warning(f"创建默认用户时出现错误（可忽略）: {db_error}")
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"创建默认用户失败: {e}")
+        # 如果表不存在等严重错误，记录警告但不阻止启动
+        logger.warning(f"创建默认用户失败（可忽略）: {e}")
     
     # 启动定时任务调度器
     try:
