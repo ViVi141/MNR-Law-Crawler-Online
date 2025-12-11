@@ -32,7 +32,13 @@ export default [
     },
   },
   {
-    ignores: ['dist', 'node_modules', '*.config.js', '*.config.ts'],
+    ignores: [
+      'dist',
+      'node_modules',
+      '*.config.js',
+      '*.config.ts',
+      'src/env.d.ts', // Vue 自动生成的类型定义文件，不应被 lint 检查
+    ],
   },
 ]
 
