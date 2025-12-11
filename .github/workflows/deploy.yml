@@ -42,9 +42,18 @@ jobs:
           script: |
             cd /path/to/deployment
             git pull origin main
-            docker-compose pull
-            docker-compose up -d --build
-            docker-compose ps
+            # 优先使用 Docker Compose V2，如果不可用则使用 V1
+            if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+              DOCKER_COMPOSE_CMD="docker compose"
+            elif command -v docker-compose &> /dev/null; then
+              DOCKER_COMPOSE_CMD="docker-compose"
+            else
+              echo "❌ Docker Compose 未安装"
+              exit 1
+            fi
+            $DOCKER_COMPOSE_CMD pull
+            $DOCKER_COMPOSE_CMD up -d --build
+            $DOCKER_COMPOSE_CMD ps
 
       - name: Health check
         if: env.SSH_HOST != ''
@@ -60,19 +69,29 @@ jobs:
             echo "=== 等待服务启动 ==="
             sleep 15
             
+            # 优先使用 Docker Compose V2，如果不可用则使用 V1
+            if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+              DOCKER_COMPOSE_CMD="docker compose"
+            elif command -v docker-compose &> /dev/null; then
+              DOCKER_COMPOSE_CMD="docker-compose"
+            else
+              echo "❌ Docker Compose 未安装"
+              exit 1
+            fi
+            
             echo "=== 检查容器状态 ==="
-            docker-compose ps
+            $DOCKER_COMPOSE_CMD ps
             
             echo "=== 检查数据库健康状态 ==="
-            docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
+            $DOCKER_COMPOSE_CMD ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
             
             echo "=== 检查后端健康状态（通过容器内部） ==="
             # 后端端口不暴露，通过容器内部访问
-            timeout 60 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && docker-compose logs backend --tail=30 && exit 1)
+            timeout 60 bash -c "until $DOCKER_COMPOSE_CMD exec -T backend python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()\" 2>/dev/null; do sleep 3; echo \"等待后端启动...\"; done" || (echo "后端健康检查失败" && $DOCKER_COMPOSE_CMD logs backend --tail=30 && exit 1)
             
             echo "=== 检查前端健康状态 ==="
             # 前端绑定到 127.0.0.1:3000
-            timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/health; do sleep 2; echo "等待前端启动..."; done' || (echo "前端健康检查失败" && docker-compose logs frontend --tail=30 && exit 1)
+            timeout 30 bash -c 'until curl -f http://127.0.0.1:3000/health; do sleep 2; echo "等待前端启动..."; done' || (echo "前端健康检查失败" && $DOCKER_COMPOSE_CMD logs frontend --tail=30 && exit 1)
             
             echo "=== 检查前端访问后端 API（通过 Nginx 代理） ==="
             # 通过前端 Nginx 代理访问后端 API

@@ -23,29 +23,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Install Docker Compose
+      - name: Verify Docker Compose
         run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
+          echo "=== 验证 Docker Compose ==="
+          # GitHub Actions runner 已预装 Docker Compose V2
+          # 使用 'docker compose' (V2) 而不是 'docker-compose' (V1)
+          docker compose version || (echo "❌ Docker Compose V2 不可用" && exit 1)
+          echo "✅ Docker Compose V2 已就绪"
 
       - name: Build Docker Compose services
         run: |
-          docker-compose build --parallel
+          docker compose build --parallel
 
       - name: Start services
         run: |
           echo "=== 启动所有服务 ==="
-          docker-compose up -d
+          docker compose up -d
           
           echo "=== 等待数据库容器启动 ==="
-          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker-compose logs db && exit 1)
+          timeout 180 bash -c 'until docker compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker compose logs db && exit 1)
           
           echo "=== 等待后端容器启动 ==="
-          timeout 120 bash -c 'until docker-compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker-compose logs backend && exit 1)
+          timeout 120 bash -c 'until docker compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker compose logs backend && exit 1)
           
           echo "=== 等待前端容器启动 ==="
-          timeout 60 bash -c 'until docker-compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker-compose logs frontend && exit 1)
+          timeout 60 bash -c 'until docker compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker compose logs frontend && exit 1)
           
           echo "=== 等待服务完全就绪 ==="
           sleep 15
@@ -53,14 +55,14 @@ jobs:
       - name: Check service health
         run: |
           echo "=== 检查容器状态 ==="
-          docker-compose ps
+          docker compose ps
           
           echo "=== 检查数据库健康状态 ==="
-          docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
+          docker compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
           
           echo "=== 检查后端健康状态（通过容器内部） ==="
           # 后端端口不暴露，通过容器内部访问
-          timeout 120 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
+          timeout 120 bash -c 'until docker compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
           
           echo "=== 检查前端健康状态 ==="
           # 前端绑定到 127.0.0.1:3000，使用 localhost 访问
@@ -76,16 +78,16 @@ jobs:
         if: failure()
         run: |
           echo "=== 数据库日志 ==="
-          docker-compose logs db --tail=50
+          docker compose logs db --tail=50
           echo ""
           echo "=== 后端日志 ==="
-          docker-compose logs backend --tail=50
+          docker compose logs backend --tail=50
           echo ""
           echo "=== 前端日志 ==="
-          docker-compose logs frontend --tail=50
+          docker compose logs frontend --tail=50
           echo ""
           echo "=== 所有容器状态 ==="
-          docker-compose ps -a
+          docker compose ps -a
 
       - name: Run integration tests
         run: |
@@ -120,7 +122,7 @@ jobs:
           
           # 测试后端 API（直接通过容器）
           echo "测试后端 API（容器内部直接访问）..."
-          docker-compose exec -T backend python -c "
+          docker compose exec -T backend python -c "
           import urllib.request
           import json
           import sys
@@ -177,7 +179,7 @@ jobs:
           
           # 测试容器间网络通信
           echo "测试容器间网络通信..."
-          docker-compose exec -T frontend curl -f http://backend:8000/api/health > /dev/null 2>&1
+          docker compose exec -T frontend curl -f http://backend:8000/api/health > /dev/null 2>&1
           if [ $? -eq 0 ]; then
             echo "✅ 前端容器可以访问后端容器"
           else
@@ -191,4 +193,4 @@ jobs:
         if: always()
         run: |
           echo "=== 停止所有服务 ==="
-          docker-compose down -v
+          docker compose down -v

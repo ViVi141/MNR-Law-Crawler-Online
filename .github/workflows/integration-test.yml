@@ -25,30 +25,33 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Install Docker Compose
+      - name: Verify Docker Compose
         run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
+          echo "=== 验证 Docker Compose ==="
+          # GitHub Actions runner 已预装 Docker Compose V2
+          # 使用 'docker compose' (V2) 而不是 'docker-compose' (V1)
+          docker compose version || (echo "❌ Docker Compose V2 不可用" && exit 1)
+          echo "✅ Docker Compose V2 已就绪"
 
       - name: Build services
         run: |
           echo "=== 构建所有服务 ==="
-          docker-compose build --parallel --progress=plain
+          # 使用 docker compose (V2) 命令
+          docker compose build --parallel --progress=plain
 
       - name: Start services
         run: |
           echo "=== 启动所有服务 ==="
-          docker-compose up -d
+          docker compose up -d
           
           echo "=== 等待数据库容器启动 ==="
-          timeout 180 bash -c 'until docker-compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker-compose logs db && exit 1)
+          timeout 180 bash -c 'until docker compose ps db | grep -q "healthy"; do sleep 5; echo "等待数据库健康检查..."; done' || (echo "数据库启动超时" && docker compose logs db && exit 1)
           
           echo "=== 等待后端容器启动 ==="
-          timeout 120 bash -c 'until docker-compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker-compose logs backend && exit 1)
+          timeout 120 bash -c 'until docker compose ps backend | grep -q "healthy\|Up"; do sleep 3; echo "等待后端启动..."; done' || (echo "后端启动超时" && docker compose logs backend && exit 1)
           
           echo "=== 等待前端容器启动 ==="
-          timeout 60 bash -c 'until docker-compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker-compose logs frontend && exit 1)
+          timeout 60 bash -c 'until docker compose ps frontend | grep -q "Up"; do sleep 2; echo "等待前端启动..."; done' || (echo "前端启动超时" && docker compose logs frontend && exit 1)
           
           echo "=== 等待服务完全就绪 ==="
           sleep 15
@@ -79,11 +82,11 @@ jobs:
           
           # 检查数据库健康状态
           echo "检查数据库..."
-          docker-compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
+          docker compose ps db | grep -q "healthy" || (echo "数据库未健康" && exit 1)
           
           # 检查后端健康状态（通过容器内部）
           echo "检查后端（容器内部）..."
-          timeout 120 bash -c 'until docker-compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
+          timeout 120 bash -c 'until docker compose exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/health\").read()" 2>/dev/null; do sleep 3; echo "等待后端启动..."; done' || (echo "后端健康检查失败" && exit 1)
           
           # 检查前端健康状态
           echo "检查前端..."
@@ -277,7 +280,7 @@ jobs:
           
           # 从后端容器测试数据库连接
           echo "测试数据库连接..."
-          docker-compose exec -T backend python -c "
+          docker compose exec -T backend python -c "
           from app.database import engine, SessionLocal
           from sqlalchemy import text
           with engine.connect() as conn:
@@ -288,7 +291,7 @@ jobs:
           
           # 测试数据库表是否存在
           echo "验证数据库表..."
-          docker-compose exec -T backend python -c "
+          docker compose exec -T backend python -c "
           from app.database import engine
           from sqlalchemy import text, inspect
           inspector = inspect(engine)
@@ -303,7 +306,7 @@ jobs:
           
           # 测试数据库查询功能
           echo "测试数据库查询功能..."
-          docker-compose exec -T backend python -c "
+          docker compose exec -T backend python -c "
           from app.database import SessionLocal
           from app.models.user import User
           db = SessionLocal()
@@ -320,7 +323,7 @@ jobs:
           
           # 测试数据库事务
           echo "测试数据库事务..."
-          docker-compose exec -T backend python -c "
+          docker compose exec -T backend python -c "
           from app.database import SessionLocal
           from sqlalchemy import text
           db = SessionLocal()
@@ -343,16 +346,16 @@ jobs:
         if: failure()
         run: |
           echo "=== 数据库日志 ==="
-          docker-compose logs db --tail=50
+          docker compose logs db --tail=50
           echo ""
           echo "=== 后端日志 ==="
-          docker-compose logs backend --tail=50
+          docker compose logs backend --tail=50
           echo ""
           echo "=== 前端日志 ==="
-          docker-compose logs frontend --tail=50
+          docker compose logs frontend --tail=50
           echo ""
           echo "=== 所有容器状态 ==="
-          docker-compose ps -a
+          docker compose ps -a
           echo ""
           echo "=== 网络信息 ==="
           docker network inspect mnr-crawler-app || true
@@ -361,6 +364,6 @@ jobs:
         if: always()
         run: |
           echo "=== 清理资源 ==="
-          docker-compose down -v
+          docker compose down -v
           docker system prune -f
 
