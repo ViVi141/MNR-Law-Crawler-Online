@@ -1,6 +1,7 @@
 """
 API健康检查测试
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,4 +22,3 @@ def test_health_endpoint_via_proxy(client: TestClient):
     response = client.get("/api/health/")
     # 应该返回200或307（重定向）
     assert response.status_code in [200, 307]
-

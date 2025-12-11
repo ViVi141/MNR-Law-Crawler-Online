@@ -10,6 +10,7 @@ from datetime import datetime
 @dataclass
 class Policy:
     """政策基本信息 - 适配自然资源部API"""
+
     title: str
     pub_date: str  # 发布日期 YYYY-MM-DD
     doc_number: str = ""  # 发文字号
@@ -24,7 +25,7 @@ class Policy:
     publisher: str = ""  # 发布机构
     crawl_time: str = ""  # 爬取时间
     _data_source: Optional[Dict[str, Any]] = None  # 数据源信息（内部使用）
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = {
@@ -49,12 +50,12 @@ class Policy:
             if "name" in self._data_source:
                 result["source_name"] = self._data_source["name"]
         # 如果存在文件路径属性，也包含在字典中
-        if hasattr(self, 'markdown_path'):
-            result["markdown_path"] = getattr(self, 'markdown_path', None)
-        if hasattr(self, 'docx_path'):
-            result["docx_path"] = getattr(self, 'docx_path', None)
+        if hasattr(self, "markdown_path"):
+            result["markdown_path"] = getattr(self, "markdown_path", None)
+        if hasattr(self, "docx_path"):
+            result["docx_path"] = getattr(self, "docx_path", None)
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Policy":
         """从字典创建"""
@@ -71,9 +72,11 @@ class Policy:
             validity=data.get("validity", ""),
             effective_date=data.get("effective_date", ""),
             publisher=data.get("publisher", ""),
-            crawl_time=data.get("crawl_time", datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+            crawl_time=data.get(
+                "crawl_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ),
         )
-    
+
     @property
     def id(self) -> str:
         """获取政策ID（使用标题和链接的组合）"""
@@ -83,10 +86,11 @@ class Policy:
 @dataclass
 class FileAttachment:
     """附件信息"""
+
     file_name: str
     file_url: str
     file_ext: str = ""
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -94,7 +98,7 @@ class FileAttachment:
             "file_url": self.file_url,
             "file_ext": self.file_ext,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FileAttachment":
         """从字典创建"""
@@ -108,9 +112,10 @@ class FileAttachment:
 @dataclass
 class PolicyDetail:
     """政策详细信息"""
+
     policy: Policy
     attachments: List[FileAttachment] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -122,6 +127,7 @@ class PolicyDetail:
 @dataclass
 class CrawlProgress:
     """爬取进度"""
+
     total_count: int = 0
     completed_count: int = 0
     failed_count: int = 0
@@ -131,21 +137,21 @@ class CrawlProgress:
     end_time: Optional[datetime] = None
     completed_policies: List[str] = field(default_factory=list)
     failed_policies: List[Dict[str, str]] = field(default_factory=list)
-    
+
     @property
     def success_rate(self) -> float:
         """成功率"""
         if self.total_count == 0:
             return 0.0
         return (self.completed_count / self.total_count) * 100
-    
+
     @property
     def progress_percentage(self) -> float:
         """进度百分比"""
         if self.total_count == 0:
             return 0.0
         return ((self.completed_count + self.failed_count) / self.total_count) * 100
-    
+
     @property
     def elapsed_time(self) -> Optional[float]:
         """已用时间（秒）"""
@@ -153,7 +159,7 @@ class CrawlProgress:
             return None
         end = self.end_time or datetime.now()
         return (end - self.start_time).total_seconds()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {

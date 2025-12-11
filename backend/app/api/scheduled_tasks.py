@@ -16,7 +16,7 @@ from ..schemas.scheduled_task import (
     ScheduledTaskResponse,
     ScheduledTaskListItem,
     ScheduledTaskListResponse,
-    ScheduledTaskRunsResponse
+    ScheduledTaskRunsResponse,
 )
 from ..services.scheduler_service import get_scheduler_service
 from ..config import settings
@@ -29,12 +29,15 @@ logger = logging.getLogger(__name__)
 def create_scheduled_task(
     task_data: ScheduledTaskCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """创建定时任务"""
     if not settings.scheduler_enabled:
-        raise HTTPException(status_code=400, detail="定时任务功能未启用，请在配置中启用SCHEDULER_ENABLED")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="定时任务功能未启用，请在配置中启用SCHEDULER_ENABLED",
+        )
+
     try:
         scheduler_service = get_scheduler_service()
         task = scheduler_service.create_scheduled_task(
@@ -43,7 +46,7 @@ def create_scheduled_task(
             task_name=task_data.task_name,
             cron_expression=task_data.cron_expression,
             config=task_data.config,
-            is_enabled=task_data.is_enabled
+            is_enabled=task_data.is_enabled,
         )
         return ScheduledTaskResponse.model_validate(task)
     except ValueError as e:
@@ -60,26 +63,19 @@ def get_scheduled_tasks(
     task_type: Optional[str] = Query(None, description="任务类型筛选"),
     is_enabled: Optional[bool] = Query(None, description="是否启用筛选"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取定时任务列表"""
     try:
         scheduler_service = get_scheduler_service()
         tasks, total = scheduler_service.get_scheduled_tasks(
-            db=db,
-            skip=skip,
-            limit=limit,
-            task_type=task_type,
-            is_enabled=is_enabled
+            db=db, skip=skip, limit=limit, task_type=task_type, is_enabled=is_enabled
         )
-        
+
         items = [ScheduledTaskListItem.model_validate(task) for task in tasks]
-        
+
         return ScheduledTaskListResponse(
-            items=items,
-            total=total,
-            skip=skip,
-            limit=limit
+            items=items, total=total, skip=skip, limit=limit
         )
     except Exception as e:
         logger.error(f"获取定时任务列表失败: {e}", exc_info=True)
@@ -90,16 +86,16 @@ def get_scheduled_tasks(
 def get_scheduled_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取定时任务详情"""
     try:
         scheduler_service = get_scheduler_service()
         task = scheduler_service.get_scheduled_task(db, task_id)
-        
+
         if not task:
             raise HTTPException(status_code=404, detail="定时任务不存在")
-        
+
         return ScheduledTaskResponse.model_validate(task)
     except HTTPException:
         raise
@@ -112,12 +108,12 @@ def get_scheduled_task(
 def enable_scheduled_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """启用定时任务"""
     if not settings.scheduler_enabled:
         raise HTTPException(status_code=400, detail="定时任务功能未启用")
-    
+
     try:
         scheduler_service = get_scheduler_service()
         task = scheduler_service.enable_scheduled_task(db, task_id)
@@ -133,7 +129,7 @@ def enable_scheduled_task(
 def disable_scheduled_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """禁用定时任务"""
     try:
@@ -151,16 +147,16 @@ def disable_scheduled_task(
 def delete_scheduled_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """删除定时任务"""
     try:
         scheduler_service = get_scheduler_service()
         success = scheduler_service.delete_scheduled_task(db, task_id)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="定时任务不存在")
-        
+
         return None
     except HTTPException:
         raise
@@ -175,28 +171,22 @@ def get_task_runs(
     skip: int = Query(0, ge=0, description="跳过数量"),
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取定时任务执行历史"""
     try:
         scheduler_service = get_scheduler_service()
         runs, total = scheduler_service.get_task_runs(
-            db=db,
-            task_id=task_id,
-            skip=skip,
-            limit=limit
+            db=db, task_id=task_id, skip=skip, limit=limit
         )
-        
+
         from ..schemas.scheduled_task import ScheduledTaskRunResponse
+
         items = [ScheduledTaskRunResponse.model_validate(run) for run in runs]
-        
+
         return ScheduledTaskRunsResponse(
-            items=items,
-            total=total,
-            skip=skip,
-            limit=limit
+            items=items, total=total, skip=skip, limit=limit
         )
     except Exception as e:
         logger.error(f"获取任务执行历史失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取任务执行历史失败: {str(e)}")
-

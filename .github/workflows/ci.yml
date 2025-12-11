@@ -230,7 +230,19 @@ jobs:
           
           # 代码格式检查（强制）
           echo "检查代码格式（Black）..."
-          black --check --diff . || (echo "❌ 代码格式不符合Black规范，请运行: black ." && exit 1)
+          if ! black --check . 2>&1; then
+            echo "❌ 代码格式不符合Black规范"
+            echo ""
+            echo "请运行以下命令格式化代码："
+            echo "  cd backend"
+            echo "  black ."
+            echo ""
+            echo "或者查看需要格式化的文件："
+            black --check --diff . 2>&1 | head -50 || true
+            echo ""
+            echo "（显示前50行差异，完整差异请运行: black --check --diff .）"
+            exit 1
+          fi
           echo "✅ 代码格式检查通过"
           
           # Flake8检查（强制关键错误）
@@ -314,8 +326,25 @@ jobs:
           # 检查关键文件
           echo "验证构建产物..."
           [ -f "dist/index.html" ] || (echo "❌ index.html 不存在" && exit 1)
-          [ -f "dist/assets/index-*.js" ] || (echo "❌ JavaScript文件不存在" && exit 1)
-          [ -f "dist/assets/index-*.css" ] || echo "⚠️ CSS文件可能不存在（如果使用内联样式）"
+          
+          # 检查JavaScript文件（使用ls来查找匹配的文件）
+          JS_FILES=$(ls dist/assets/*.js 2>/dev/null | head -1)
+          if [ -z "$JS_FILES" ]; then
+            echo "❌ JavaScript文件不存在"
+            echo "dist/assets 目录内容："
+            ls -la dist/assets/ 2>/dev/null || echo "dist/assets 目录不存在"
+            exit 1
+          else
+            echo "✅ 找到JavaScript文件: $(echo $JS_FILES | xargs basename)"
+          fi
+          
+          # 检查CSS文件（可选）
+          CSS_FILES=$(ls dist/assets/*.css 2>/dev/null | head -1)
+          if [ -z "$CSS_FILES" ]; then
+            echo "⚠️ CSS文件可能不存在（如果使用内联样式）"
+          else
+            echo "✅ 找到CSS文件: $(echo $CSS_FILES | xargs basename)"
+          fi
           
           # 验证index.html内容
           echo "验证index.html内容..."

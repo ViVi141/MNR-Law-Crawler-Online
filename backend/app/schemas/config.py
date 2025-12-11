@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class FeatureFlagsResponse(BaseModel):
     """功能开关响应"""
+
     s3_enabled: bool
     scheduler_enabled: bool
     email_enabled: bool
@@ -16,12 +17,17 @@ class FeatureFlagsResponse(BaseModel):
 
 class FeatureFlagUpdate(BaseModel):
     """更新功能开关"""
-    flag_name: str = Field(..., description="功能开关名称 (s3_enabled/scheduler_enabled/email_enabled/cache_enabled)")
+
+    flag_name: str = Field(
+        ...,
+        description="功能开关名称 (s3_enabled/scheduler_enabled/email_enabled/cache_enabled)",
+    )
     enabled: bool = Field(..., description="是否启用")
 
 
 class S3ConfigResponse(BaseModel):
     """S3配置响应"""
+
     enabled: bool
     bucket_name: Optional[str] = None
     region: str
@@ -32,6 +38,7 @@ class S3ConfigResponse(BaseModel):
 
 class S3ConfigUpdate(BaseModel):
     """更新S3配置"""
+
     enabled: Optional[bool] = None
     bucket_name: Optional[str] = None
     region: Optional[str] = None
@@ -42,6 +49,7 @@ class S3ConfigUpdate(BaseModel):
 
 class S3TestRequest(BaseModel):
     """S3测试请求"""
+
     bucket_name: Optional[str] = None
     region: Optional[str] = None
     endpoint_url: Optional[str] = None
@@ -51,6 +59,7 @@ class S3TestRequest(BaseModel):
 
 class EmailConfigResponse(BaseModel):
     """邮件配置响应"""
+
     enabled: bool
     smtp_host: Optional[str] = None
     smtp_port: int
@@ -62,6 +71,7 @@ class EmailConfigResponse(BaseModel):
 
 class EmailConfigUpdate(BaseModel):
     """更新邮件配置"""
+
     enabled: Optional[bool] = None
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
@@ -73,6 +83,7 @@ class EmailConfigUpdate(BaseModel):
 
 class EmailTestRequest(BaseModel):
     """邮件测试请求"""
+
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_user: Optional[str] = None
@@ -82,12 +93,14 @@ class EmailTestRequest(BaseModel):
 
 class TestEmailRequest(BaseModel):
     """发送测试邮件请求"""
+
     to_address: str = Field(..., description="收件人地址")
     config: Optional[EmailTestRequest] = None
 
 
 class TestResponse(BaseModel):
     """测试响应"""
+
     success: bool
     message: str
     error: Optional[str] = None
@@ -96,12 +109,15 @@ class TestResponse(BaseModel):
 
 class CrawlerConfigResponse(BaseModel):
     """爬虫配置响应"""
+
     request_delay: float = Field(0.5, description="爬取延迟（秒）")
     use_proxy: bool = Field(False, description="是否使用代理")
 
 
 class CrawlerConfigUpdate(BaseModel):
     """更新爬虫配置"""
-    request_delay: Optional[float] = Field(None, ge=0, description="爬取延迟（秒），最小值0")
-    use_proxy: Optional[bool] = Field(None, description="是否使用代理")
 
+    request_delay: Optional[float] = Field(
+        None, ge=0, description="爬取延迟（秒），最小值0"
+    )
+    use_proxy: Optional[bool] = Field(None, description="是否使用代理")

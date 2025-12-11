@@ -17,12 +17,7 @@ from ..middleware.auth import get_current_user
 from ..models.user import User
 from ..models.task import Task, TaskPolicy
 from ..models.policy import Policy
-from ..schemas.task import (
-    TaskCreate,
-    TaskResponse,
-    TaskListItem,
-    TaskListResponse
-)
+from ..schemas.task import TaskCreate, TaskResponse, TaskListItem, TaskListResponse
 from ..services.task_service import TaskService
 from ..services.storage_service import StorageService
 
@@ -34,9 +29,9 @@ logger = logging.getLogger(__name__)
 def _generate_markdown_from_policy(policy) -> str:
     """从政策对象生成Markdown内容"""
     md_lines = []
-    
+
     # YAML Front Matter
-    md_lines.append('---')
+    md_lines.append("---")
     md_lines.append(f'title: "{policy.title}"')
     if policy.level:
         md_lines.append(f'level: "{policy.level}"')
@@ -54,44 +49,44 @@ def _generate_markdown_from_policy(policy) -> str:
         md_lines.append(f'publisher: "{policy.publisher}"')
     if policy.source_url:
         md_lines.append(f'source_url: "{policy.source_url}"')
-    md_lines.append('---')
-    md_lines.append('')
-    
-    md_lines.append(f'# {policy.title}')
-    md_lines.append('')
-    
-    md_lines.append('## 基本信息')
-    md_lines.append('')
+    md_lines.append("---")
+    md_lines.append("")
+
+    md_lines.append(f"# {policy.title}")
+    md_lines.append("")
+
+    md_lines.append("## 基本信息")
+    md_lines.append("")
     if policy.publisher:
-        md_lines.append(f'- **发布机构**: {policy.publisher}')
+        md_lines.append(f"- **发布机构**: {policy.publisher}")
     if policy.level:
-        md_lines.append(f'- **效力级别**: {policy.level}')
+        md_lines.append(f"- **效力级别**: {policy.level}")
     if policy.pub_date:
-        md_lines.append(f'- **发布日期**: {policy.pub_date}')
+        md_lines.append(f"- **发布日期**: {policy.pub_date}")
     if policy.doc_number:
-        md_lines.append(f'- **发文字号**: {policy.doc_number}')
+        md_lines.append(f"- **发文字号**: {policy.doc_number}")
     if policy.effective_date:
-        md_lines.append(f'- **生效日期**: {policy.effective_date}')
+        md_lines.append(f"- **生效日期**: {policy.effective_date}")
     if policy.validity:
-        md_lines.append(f'- **有效性**: {policy.validity}')
+        md_lines.append(f"- **有效性**: {policy.validity}")
     if policy.category:
-        md_lines.append(f'- **分类**: {policy.category}')
+        md_lines.append(f"- **分类**: {policy.category}")
     if policy.source_url:
-        md_lines.append(f'- **来源链接**: [查看原文]({policy.source_url})')
-    md_lines.append('')
-    
-    md_lines.append('---')
-    md_lines.append('')
-    md_lines.append('## 正文内容')
-    md_lines.append('')
+        md_lines.append(f"- **来源链接**: [查看原文]({policy.source_url})")
+    md_lines.append("")
+
+    md_lines.append("---")
+    md_lines.append("")
+    md_lines.append("## 正文内容")
+    md_lines.append("")
     if policy.content:
         md_lines.append(policy.content)
     else:
-        md_lines.append('> **注意**: 该政策的正文内容无法自动获取。')
-        md_lines.append('> ')
-        md_lines.append('> 请访问[来源链接](#基本信息)查看完整文档内容。')
-    
-    return '\n'.join(md_lines)
+        md_lines.append("> **注意**: 该政策的正文内容无法自动获取。")
+        md_lines.append("> ")
+        md_lines.append("> 请访问[来源链接](#基本信息)查看完整文档内容。")
+
+    return "\n".join(md_lines)
 
 
 def _generate_docx_from_policy(policy, output_path: str, converter):
@@ -102,58 +97,60 @@ def _generate_docx_from_policy(policy, output_path: str, converter):
     except ImportError:
         logger.warning("python-docx未安装，无法生成DOCX")
         return
-    
+
     # 创建文档
     doc = Document()
-    
+
     # 设置文档标题
     title = doc.add_heading(policy.title, level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
+
     # 添加基本信息
-    doc.add_heading('基本信息', level=2)
+    doc.add_heading("基本信息", level=2)
     info_para = doc.add_paragraph()
-    
+
     if policy.publisher:
-        info_para.add_run('发布机构: ').bold = True
+        info_para.add_run("发布机构: ").bold = True
         info_para.add_run(policy.publisher)
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.level:
-        info_para.add_run('效力级别: ').bold = True
+        info_para.add_run("效力级别: ").bold = True
         info_para.add_run(policy.level)
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.pub_date:
-        info_para.add_run('发布日期: ').bold = True
+        info_para.add_run("发布日期: ").bold = True
         info_para.add_run(str(policy.pub_date))
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.doc_number:
-        info_para.add_run('发文字号: ').bold = True
+        info_para.add_run("发文字号: ").bold = True
         info_para.add_run(policy.doc_number)
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.effective_date:
-        info_para.add_run('生效日期: ').bold = True
+        info_para.add_run("生效日期: ").bold = True
         info_para.add_run(str(policy.effective_date))
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.validity:
-        info_para.add_run('有效性: ').bold = True
+        info_para.add_run("有效性: ").bold = True
         info_para.add_run(policy.validity)
-        info_para.add_run('\n')
+        info_para.add_run("\n")
     if policy.category:
-        info_para.add_run('分类: ').bold = True
+        info_para.add_run("分类: ").bold = True
         info_para.add_run(policy.category)
-        info_para.add_run('\n')
-    
+        info_para.add_run("\n")
+
     # 添加正文内容
-    doc.add_heading('正文内容', level=2)
+    doc.add_heading("正文内容", level=2)
     if policy.content:
         # 将内容按段落分割
-        paragraphs = policy.content.split('\n')
+        paragraphs = policy.content.split("\n")
         for para_text in paragraphs:
             if para_text.strip():
                 doc.add_paragraph(para_text.strip())
     else:
-        doc.add_paragraph('该政策的正文内容无法自动获取，请访问来源链接查看完整文档内容。')
-    
+        doc.add_paragraph(
+            "该政策的正文内容无法自动获取，请访问来源链接查看完整文档内容。"
+        )
+
     # 保存文档
     doc.save(output_path)
 
@@ -163,7 +160,7 @@ def create_task(
     task_data: TaskCreate,
     auto_start: bool = Query(True, description="是否自动启动任务"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """创建任务"""
     try:
@@ -172,19 +169,19 @@ def create_task(
             task_name=task_data.task_name,
             task_type=task_data.task_type,
             config=task_data.config,
-            user_id=current_user.id
+            user_id=current_user.id,
         )
-        
+
         # 如果设置了自动启动，立即启动任务
         if auto_start:
             try:
                 task = task_service.start_task(db, task.id, background=True)
             except Exception as e:
                 logger.warning(f"自动启动任务失败: {e}")
-        
+
         # 在序列化前确保所有字段都已加载（避免延迟加载问题）
         _ = task.id, task.task_name, task.task_type, task.status, task.created_at
-        
+
         return TaskResponse.model_validate(task)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -201,7 +198,7 @@ def get_tasks(
     status: Optional[str] = Query(None, description="状态筛选"),
     completed_only: bool = Query(False, description="只返回已完成的任务"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取任务列表"""
     try:
@@ -209,34 +206,35 @@ def get_tasks(
         actual_status = status
         if completed_only:
             actual_status = "completed"
-        
+
         tasks, total = task_service.get_tasks(
             db=db,
             skip=skip,
             limit=limit,
             task_type=task_type,
             status=actual_status,
-            completed_only=completed_only
+            completed_only=completed_only,
         )
-        
+
         # 在序列化前确保所有字段都已加载
         items = []
         for task in tasks:
             try:
                 # 访问所有需要的字段以触发加载
-                _ = task.id, task.task_name, task.task_type, task.status, task.created_at
+                _ = (
+                    task.id,
+                    task.task_name,
+                    task.task_type,
+                    task.status,
+                    task.created_at,
+                )
                 item = TaskListItem.model_validate(task)
                 items.append(item)
             except Exception as e:
                 logger.warning(f"序列化任务失败 (ID: {task.id}): {e}")
                 continue
-        
-        return TaskListResponse(
-            items=items,
-            total=total,
-            skip=skip,
-            limit=limit
-        )
+
+        return TaskListResponse(items=items, total=total, skip=skip, limit=limit)
     except Exception as e:
         logger.error(f"获取任务列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
@@ -246,14 +244,14 @@ def get_tasks(
 def get_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取任务详情"""
     task = task_service.get_task(db, task_id)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     return TaskResponse.model_validate(task)
 
 
@@ -262,7 +260,7 @@ def start_task(
     task_id: int,
     background: bool = Query(True, description="是否后台执行"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """启动任务"""
     try:
@@ -279,7 +277,7 @@ def start_task(
 def stop_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """停止/取消任务"""
     try:
@@ -296,7 +294,7 @@ def stop_task(
 def pause_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """暂停任务"""
     try:
@@ -313,7 +311,7 @@ def pause_task(
 def resume_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """恢复任务"""
     try:
@@ -330,7 +328,7 @@ def resume_task(
 def delete_task(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """删除任务"""
     try:
@@ -348,14 +346,14 @@ def download_task_files(
     task_id: int,
     file_format: str = Query("all", description="文件格式: all, markdown, docx"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """下载任务的所有文件（打包成zip）
-    
+
     Args:
         task_id: 任务ID
         file_format: 文件格式筛选 (all, markdown, docx)
-    
+
     Returns:
         ZIP文件流
     """
@@ -364,27 +362,27 @@ def download_task_files(
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
-        
+
         # 获取任务关联的所有政策
         task_policies = db.query(TaskPolicy).filter(TaskPolicy.task_id == task_id).all()
         if not task_policies:
             raise HTTPException(status_code=404, detail="该任务没有关联的政策")
-        
+
         policy_ids = [tp.policy_id for tp in task_policies]
         policies = db.query(Policy).filter(Policy.id.in_(policy_ids)).all()
-        
+
         if not policies:
             raise HTTPException(status_code=404, detail="未找到任何政策")
-        
+
         # 初始化存储服务
         storage_service = StorageService()
-        
+
         # 创建临时ZIP文件
         zip_buffer = io.BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             file_count = 0
-            
+
             # 确定要下载的文件类型
             file_types = []
             if file_format == "all":
@@ -394,21 +392,32 @@ def download_task_files(
             elif file_format == "docx":
                 file_types = ["docx"]
             else:
-                raise HTTPException(status_code=400, detail=f"不支持的文件格式: {file_format}")
-            
+                raise HTTPException(
+                    status_code=400, detail=f"不支持的文件格式: {file_format}"
+                )
+
             # 导入文件生成工具
             from ..core.converter import DocumentConverter
+
             converter = DocumentConverter()
-            
+
             # 遍历每个政策，获取文件
             for policy in policies:
-                policy_title = policy.title.replace('/', '_').replace('\\', '_').replace(':', '_')
-                safe_title = "".join(c for c in policy_title if c.isalnum() or c in (' ', '-', '_', '(', ')', '（', '）'))[:100]
-                
+                policy_title = (
+                    policy.title.replace("/", "_").replace("\\", "_").replace(":", "_")
+                )
+                safe_title = "".join(
+                    c
+                    for c in policy_title
+                    if c.isalnum() or c in (" ", "-", "_", "(", ")", "（", "）")
+                )[:100]
+
                 for file_type in file_types:
                     # 获取文件路径（使用policy的task_id，确保文件路径正确）
-                    file_path = storage_service.get_policy_file_path(policy.id, file_type, task_id=policy.task_id)
-                    
+                    file_path = storage_service.get_policy_file_path(
+                        policy.id, file_type, task_id=policy.task_id
+                    )
+
                     # 如果文件不存在，先检查S3
                     if not file_path or not os.path.exists(file_path):
                         # 检查数据库中是否有S3路径
@@ -417,117 +426,152 @@ def download_task_files(
                             s3_key = policy.markdown_s3_key
                         elif file_type == "docx" and policy.docx_s3_key:
                             s3_key = policy.docx_s3_key
-                        
+
                         # 如果启用了S3且有S3路径，尝试从S3下载
                         if s3_key and storage_service.s3_service.is_enabled():
-                            file_path = storage_service.get_policy_file_path(policy.id, file_type, task_id=policy.task_id)
+                            file_path = storage_service.get_policy_file_path(
+                                policy.id, file_type, task_id=policy.task_id
+                            )
                             if file_path and os.path.exists(file_path):
                                 # 使用从S3下载的文件
                                 pass
                             else:
-                             logger.warning(f"政策 {policy.id} 的 {file_type} 文件在S3中不存在")
+                                logger.warning(
+                                    f"政策 {policy.id} 的 {file_type} 文件在S3中不存在"
+                                )
                             continue
-                    
+
                     # 如果还是没有文件，才重新生成
                     if not file_path or not os.path.exists(file_path):
                         # 如果没有S3且文件不存在，才生成
-                        logger.warning(f"政策 {policy.id} 的 {file_type} 文件不存在，尝试重新生成...")
+                        logger.warning(
+                            f"政策 {policy.id} 的 {file_type} 文件不存在，尝试重新生成..."
+                        )
                         try:
                             # 使用storage_service的临时目录，确保文件可以被多个任务共享
-                            from ..services.file_cleanup_service import get_cleanup_service
+                            from ..services.file_cleanup_service import (
+                                get_cleanup_service,
+                            )
+
                             cleanup_service = get_cleanup_service()
-                            
+
                             # 创建临时目录（基于policy_id，确保同一政策的文件可以被多个任务共享）
-                            temp_base_dir = storage_service.local_dir / "temp_generated" / str(policy.id)
+                            temp_base_dir = (
+                                storage_service.local_dir
+                                / "temp_generated"
+                                / str(policy.id)
+                            )
                             temp_base_dir.mkdir(parents=True, exist_ok=True)
                             # 将文件类型转换为实际扩展名
                             file_ext = "md" if file_type == "markdown" else file_type
                             temp_file_path = temp_base_dir / f"{policy.id}.{file_ext}"
-                            
+
                             # 如果文件已存在且未过期（1天内），直接使用
                             if temp_file_path.exists():
                                 file_stat = temp_file_path.stat()
-                                file_age = datetime.now() - datetime.fromtimestamp(file_stat.st_mtime)
+                                file_age = datetime.now() - datetime.fromtimestamp(
+                                    file_stat.st_mtime
+                                )
                                 if file_age < timedelta(hours=24):
                                     file_path = str(temp_file_path)
                                     logger.debug(f"使用已存在的临时文件: {file_path}")
                                     continue
-                            
+
                             # 根据文件类型生成文件
                             if file_type == "markdown":
                                 # 生成Markdown文件
                                 md_content = _generate_markdown_from_policy(policy)
-                                with open(temp_file_path, 'w', encoding='utf-8') as f:
+                                with open(temp_file_path, "w", encoding="utf-8") as f:
                                     f.write(md_content)
                             elif file_type == "docx":
                                 # 生成DOCX文件
-                                _generate_docx_from_policy(policy, str(temp_file_path), converter)
-                            
+                                _generate_docx_from_policy(
+                                    policy, str(temp_file_path), converter
+                                )
+
                             # 如果生成成功，注册临时文件并保存到storage_service
-                            if temp_file_path.exists() and temp_file_path.stat().st_size > 0:
+                            if (
+                                temp_file_path.exists()
+                                and temp_file_path.stat().st_size > 0
+                            ):
                                 file_path = str(temp_file_path)
                                 # 注册临时文件，用于后续清理
                                 cleanup_service.register_temp_file(file_path)
-                                
+
                                 # 尝试保存到storage_service（使用policy的task_id，确保文件路径正确）
                                 try:
                                     storage_result = storage_service.save_policy_file(
                                         policy.id,
                                         file_type,
                                         file_path,
-                                        task_id=policy.task_id
+                                        task_id=policy.task_id,
                                     )
                                     if storage_result.get("success"):
                                         # 如果保存成功，更新数据库中的路径
-                                        policy.markdown_local_path = storage_result.get("local_path") if file_type == "markdown" else policy.markdown_local_path
-                                        policy.docx_local_path = storage_result.get("local_path") if file_type == "docx" else policy.docx_local_path
+                                        policy.markdown_local_path = (
+                                            storage_result.get("local_path")
+                                            if file_type == "markdown"
+                                            else policy.markdown_local_path
+                                        )
+                                        policy.docx_local_path = (
+                                            storage_result.get("local_path")
+                                            if file_type == "docx"
+                                            else policy.docx_local_path
+                                        )
                                         db.commit()
-                                        logger.debug(f"文件已保存到存储服务: {storage_result.get('local_path')}")
+                                        logger.debug(
+                                            f"文件已保存到存储服务: {storage_result.get('local_path')}"
+                                        )
                                 except Exception as e:
                                     logger.warning(f"保存文件到存储服务失败: {e}")
-                                
-                                logger.info(f"成功重新生成政策 {policy.id} 的 {file_type} 文件")
+
+                                logger.info(
+                                    f"成功重新生成政策 {policy.id} 的 {file_type} 文件"
+                                )
                             else:
-                                logger.warning(f"重新生成政策 {policy.id} 的 {file_type} 文件失败")
+                                logger.warning(
+                                    f"重新生成政策 {policy.id} 的 {file_type} 文件失败"
+                                )
                                 continue
                         except Exception as e:
-                            logger.error(f"重新生成政策 {policy.id} 的 {file_type} 文件时出错: {e}")
+                            logger.error(
+                                f"重新生成政策 {policy.id} 的 {file_type} 文件时出错: {e}"
+                            )
                             continue
-                    
+
                     if file_path and os.path.exists(file_path):
                         # 构造ZIP内的文件路径
                         # 格式: 任务名称/文件格式/政策ID_标题.扩展名
                         # 将文件类型转换为实际扩展名
                         file_ext = "md" if file_type == "markdown" else file_type
                         zip_path = f"{task.task_name}/{file_type}/{policy.id}_{safe_title}.{file_ext}"
-                        
+
                         # 添加到ZIP文件
                         zip_file.write(file_path, zip_path)
                         file_count += 1
                         logger.debug(f"添加文件到ZIP: {zip_path}")
-        
+
         if file_count == 0:
             raise HTTPException(status_code=404, detail="未找到任何可下载的文件")
-        
+
         # 重置缓冲区位置
         zip_buffer.seek(0)
-        
+
         # 生成文件名
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         zip_filename = f"{task.task_name}_{timestamp}.zip"
-        
+
         # 返回ZIP文件流
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
             headers={
                 "Content-Disposition": f"attachment; filename*=UTF-8''{zip_filename}"
-            }
+            },
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"下载任务文件失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"下载任务文件失败: {str(e)}")
-

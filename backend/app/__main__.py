@@ -6,7 +6,7 @@ python -m app
 if __name__ == "__main__":
     from .main import app
     import uvicorn
-    
+
     print("=" * 60)
     print("MNR Law Crawler Web - 启动中...")
     print("=" * 60)
@@ -15,6 +15,5 @@ if __name__ == "__main__":
     print("  - 健康检查: http://localhost:8000/api/health")
     print("  - 默认账号: admin / admin123")
     print("\n" + "=" * 60 + "\n")
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

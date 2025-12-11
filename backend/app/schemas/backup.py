@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field
 
 class BackupCreateRequest(BaseModel):
     """创建备份请求Schema"""
+
     backup_type: str = Field(default="full", description="备份类型 (full/incremental)")
     backup_name: Optional[str] = Field(None, description="备份名称（可选）")
 
 
 class BackupRecordResponse(BaseModel):
     """备份记录响应Schema"""
+
     id: str
     backup_type: str
     s3_key: Optional[str] = None
@@ -38,6 +40,7 @@ class BackupRecordResponse(BaseModel):
 
 class BackupRecordListResponse(BaseModel):
     """备份记录列表响应"""
+
     items: list[BackupRecordResponse]
     total: int
     skip: int
@@ -46,11 +49,15 @@ class BackupRecordListResponse(BaseModel):
 
 class BackupRestoreRequest(BaseModel):
     """恢复备份请求Schema"""
-    target_database: Optional[str] = Field(None, description="目标数据库名称（可选，默认使用原数据库）")
+
+    target_database: Optional[str] = Field(
+        None, description="目标数据库名称（可选，默认使用原数据库）"
+    )
 
 
 class BackupRestoreResponse(BaseModel):
     """恢复备份响应Schema"""
+
     success: bool
     message: str
     backup_id: Optional[str] = None
@@ -60,9 +67,9 @@ class BackupRestoreResponse(BaseModel):
 
 class BackupCleanupResponse(BaseModel):
     """清理备份响应Schema"""
+
     success: bool
     message: str
     deleted_count: int = 0
     kept_count: int = 0
     error: Optional[str] = None
-

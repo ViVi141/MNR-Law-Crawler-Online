@@ -35,12 +35,12 @@ def reset_password(username: str, new_password: str = None):
         if not user:
             logger.error(f"用户不存在: {username}")
             return False
-        
+
         # 生成随机密码或使用提供的密码
         if new_password is None:
             new_password = AuthService.generate_random_password(12)
             logger.info(f"生成随机密码: {new_password}")
-        
+
         # 重置密码
         success = AuthService.reset_password(db, user, new_password)
         if success:
@@ -78,9 +78,9 @@ def main():
         print("     python reset_password.py admin MyNewPassword123")
         print()
         sys.exit(1)
-    
+
     username = sys.argv[1]
-    
+
     if len(sys.argv) == 3 and sys.argv[2] == "--generate":
         # 生成随机密码
         new_password = None
@@ -93,14 +93,14 @@ def main():
     else:
         logger.error("参数错误，请使用 --generate 或提供新密码")
         sys.exit(1)
-    
+
     print("=" * 60)
     print("正在重置密码...")
     print("=" * 60)
     print()
-    
+
     success = reset_password(username, new_password)
-    
+
     if success:
         print()
         print("=" * 60)
@@ -117,4 +117,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

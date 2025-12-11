@@ -17,7 +17,7 @@ from ..schemas.backup import (
     BackupCreateRequest,
     BackupRestoreRequest,
     BackupRestoreResponse,
-    BackupCleanupResponse
+    BackupCleanupResponse,
 )
 
 router = APIRouter(prefix="/backups", tags=["backups"])
@@ -25,25 +25,25 @@ backup_service = BackupService()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/", response_model=BackupRecordResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=BackupRecordResponse, status_code=status.HTTP_201_CREATED
+)
 def create_backup(
     request: BackupCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """创建数据库备份"""
     try:
         backup_record = backup_service.create_backup(
-            db=db,
-            backup_type=request.backup_type,
-            backup_name=request.backup_name
+            db=db, backup_type=request.backup_type, backup_name=request.backup_name
         )
         return BackupRecordResponse.model_validate(backup_record)
     except Exception as e:
         logger.error(f"创建备份失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建备份失败: {str(e)}"
+            detail=f"创建备份失败: {str(e)}",
         )
 
 
@@ -53,10 +53,12 @@ def get_backups(
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
     backup_type: Optional[str] = Query(None, description="备份类型筛选"),
     status_filter: Optional[str] = Query(None, alias="status", description="状态筛选"),
-    source_type: Optional[str] = Query(None, description="来源类型筛选 (manual/task/scheduled)"),
+    source_type: Optional[str] = Query(
+        None, description="来源类型筛选 (manual/task/scheduled)"
+    ),
     source_deleted: Optional[bool] = Query(None, description="来源是否已删除筛选"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取备份记录列表"""
     try:
@@ -67,19 +69,19 @@ def get_backups(
             backup_type=backup_type,
             status=status_filter,
             source_type=source_type,
-            source_deleted=source_deleted
+            source_deleted=source_deleted,
         )
         return BackupRecordListResponse(
             items=[BackupRecordResponse.model_validate(record) for record in records],
             total=total,
             skip=skip,
-            limit=limit
+            limit=limit,
         )
     except Exception as e:
         logger.error(f"获取备份列表失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取备份列表失败: {str(e)}"
+            detail=f"获取备份列表失败: {str(e)}",
         )
 
 
@@ -87,15 +89,14 @@ def get_backups(
 def get_backup(
     backup_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """获取备份记录详情"""
     try:
         backup_record = backup_service.get_backup_record(db, backup_id)
         if not backup_record:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="备份记录不存在"
+                status_code=status.HTTP_404_NOT_FOUND, detail="备份记录不存在"
             )
         return BackupRecordResponse.model_validate(backup_record)
     except HTTPException:
@@ -104,7 +105,7 @@ def get_backup(
         logger.error(f"获取备份详情失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取备份详情失败: {str(e)}"
+            detail=f"获取备份详情失败: {str(e)}",
         )
 
 
@@ -113,23 +114,22 @@ def restore_backup(
     backup_id: str,
     request: BackupRestoreRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """恢复数据库备份
-    
+
     ⚠️ 警告：此操作将覆盖目标数据库的所有数据！
     """
     try:
         result = backup_service.restore_backup(
-            backup_id=backup_id,
-            target_database=request.target_database
+            backup_id=backup_id, target_database=request.target_database
         )
         return BackupRestoreResponse(**result)
     except Exception as e:
         logger.error(f"恢复备份失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"恢复备份失败: {str(e)}"
+            detail=f"恢复备份失败: {str(e)}",
         )
 
 
@@ -137,37 +137,37 @@ def restore_backup(
 def download_backup(
     backup_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """下载备份文件"""
     try:
         backup_record = backup_service.get_backup_record(db, backup_id)
         if not backup_record:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="备份记录不存在"
+                status_code=status.HTTP_404_NOT_FOUND, detail="备份记录不存在"
             )
-        
+
         if backup_record.status != "completed":
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="备份未完成，无法下载"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="备份未完成，无法下载"
             )
-        
+
         # 获取备份文件路径
         from pathlib import Path
         import os
         from fastapi.responses import FileResponse
-        
+
         backup_path = None
         if backup_record.local_path and Path(backup_record.local_path).exists():
             backup_path = backup_record.local_path
         elif backup_record.s3_key:
             # 从S3下载到临时文件
             from ..services.s3_service import S3Service
+
             s3_service = S3Service()
             if s3_service.is_enabled():
                 import tempfile
+
                 temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
                 temp_path = temp_file.name
                 temp_file.close()
@@ -176,33 +176,28 @@ def download_backup(
                 else:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="从S3下载备份文件失败"
+                        detail="从S3下载备份文件失败",
                     )
             else:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="备份文件不存在"
+                    status_code=status.HTTP_404_NOT_FOUND, detail="备份文件不存在"
                 )
         else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="备份文件不存在"
+                status_code=status.HTTP_404_NOT_FOUND, detail="备份文件不存在"
             )
-        
+
         if not backup_path or not os.path.exists(backup_path):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="备份文件不存在"
+                status_code=status.HTTP_404_NOT_FOUND, detail="备份文件不存在"
             )
-        
+
         # 生成下载文件名
         backup_name = backup_record.source_name or backup_record.id
         filename = f"{backup_name}_{backup_record.backup_type}_{backup_record.start_time.strftime('%Y%m%d_%H%M%S')}.sql"
-        
+
         return FileResponse(
-            backup_path,
-            media_type="application/sql",
-            filename=filename
+            backup_path, media_type="application/sql", filename=filename
         )
     except HTTPException:
         raise
@@ -210,7 +205,7 @@ def download_backup(
         logger.error(f"下载备份失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"下载备份失败: {str(e)}"
+            detail=f"下载备份失败: {str(e)}",
         )
 
 
@@ -218,15 +213,14 @@ def download_backup(
 def delete_backup(
     backup_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """删除备份记录和文件"""
     try:
         success = backup_service.delete_backup(db, backup_id)
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="备份记录不存在或无法删除"
+                status_code=status.HTTP_404_NOT_FOUND, detail="备份记录不存在或无法删除"
             )
         return None
     except HTTPException:
@@ -235,7 +229,7 @@ def delete_backup(
         logger.error(f"删除备份失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除备份失败: {str(e)}"
+            detail=f"删除备份失败: {str(e)}",
         )
 
 
@@ -243,7 +237,7 @@ def delete_backup(
 def cleanup_backups(
     keep_count: int = Query(10, ge=1, le=100, description="保留的备份数量"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """清理旧备份，保留最新的N个"""
     try:
@@ -253,6 +247,5 @@ def cleanup_backups(
         logger.error(f"清理备份失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"清理备份失败: {str(e)}"
+            detail=f"清理备份失败: {str(e)}",
         )
-

@@ -18,24 +18,21 @@ logger = logging.getLogger(__name__)
 
 class PolicyService:
     """政策服务"""
-    
+
     def __init__(self):
         """初始化政策服务"""
         self.storage_service = StorageService()
-    
+
     def save_policy(
-        self,
-        db: Session,
-        policy_data: Dict[str, Any],
-        task_id: Optional[int] = None
+        self, db: Session, policy_data: Dict[str, Any], task_id: Optional[int] = None
     ) -> Optional[PolicyModel]:
         """保存政策到数据库
-        
+
         Args:
             db: 数据库会话
             policy_data: 政策数据字典（来自爬虫）
             task_id: 关联的任务ID
-            
+
         Returns:
             PolicyModel对象，如果已存在则返回现有对象
         """
@@ -44,33 +41,45 @@ class PolicyService:
             pub_date = self._parse_date(policy_data.get("pub_date"))
             effective_date = self._parse_date(policy_data.get("effective_date"))
             crawl_time = datetime.now()
-            
+
             # 检查政策是否已存在（基于任务ID，确保每个任务的数据独立）
             if task_id:
                 # 如果提供了task_id，检查是否存在相同的(title, source_url, pub_date, task_id)
-                existing_policy = db.query(PolicyModel).filter(
-                    PolicyModel.title == policy_data.get("title", ""),
-                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                    PolicyModel.pub_date == pub_date,
-                    PolicyModel.task_id == task_id
-                ).first()
+                existing_policy = (
+                    db.query(PolicyModel)
+                    .filter(
+                        PolicyModel.title == policy_data.get("title", ""),
+                        PolicyModel.source_url
+                        == policy_data.get("source", policy_data.get("url", "")),
+                        PolicyModel.pub_date == pub_date,
+                        PolicyModel.task_id == task_id,
+                    )
+                    .first()
+                )
             else:
                 # 如果没有task_id，检查是否存在相同的(title, source_url, pub_date)且task_id为NULL（兼容旧数据）
-                existing_policy = db.query(PolicyModel).filter(
-                    PolicyModel.title == policy_data.get("title", ""),
-                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                    PolicyModel.pub_date == pub_date,
-                    PolicyModel.task_id.is_(None)
-                ).first()
-            
+                existing_policy = (
+                    db.query(PolicyModel)
+                    .filter(
+                        PolicyModel.title == policy_data.get("title", ""),
+                        PolicyModel.source_url
+                        == policy_data.get("source", policy_data.get("url", "")),
+                        PolicyModel.pub_date == pub_date,
+                        PolicyModel.task_id.is_(None),
+                    )
+                    .first()
+                )
+
             if existing_policy:
-                logger.debug(f"政策已存在，跳过: {existing_policy.title} (Task: {task_id})")
+                logger.debug(
+                    f"政策已存在，跳过: {existing_policy.title} (Task: {task_id})"
+                )
                 return existing_policy
-            
+
             # 计算字数
             content = policy_data.get("content", "")
             word_count = len(content) if content else 0
-            
+
             # 处理关键词（JSON数组字符串）
             keywords = policy_data.get("keywords", [])
             if isinstance(keywords, list):
@@ -79,15 +88,17 @@ class PolicyService:
                 keywords_str = keywords
             else:
                 keywords_str = "[]"
-            
+
             # 处理source_name：优先使用policy_data中的source_name，如果没有则从_data_source获取
             source_name = policy_data.get("source_name", "")
             if not source_name:
                 # 尝试从_data_source获取数据源名称
-                data_source = policy_data.get("_data_source") or policy_data.get("data_source")
+                data_source = policy_data.get("_data_source") or policy_data.get(
+                    "data_source"
+                )
                 if data_source and isinstance(data_source, dict):
                     source_name = data_source.get("name", "")
-            
+
             # 如果还是没有，尝试从source_url推断（兼容旧数据）
             if not source_name:
                 source_url = policy_data.get("source", policy_data.get("url", ""))
@@ -99,9 +110,10 @@ class PolicyService:
                         source_name = "政策法规库"
                     else:
                         from urllib.parse import urlparse
+
                         parsed = urlparse(source_url)
                         source_name = parsed.netloc or "未知来源"
-            
+
             # 创建政策记录（包含task_id，确保每个任务的数据独立）
             policy = PolicyModel(
                 title=policy_data.get("title", ""),
@@ -121,29 +133,29 @@ class PolicyService:
                 word_count=word_count,
                 crawl_time=crawl_time,
                 is_indexed=False,
-                task_id=task_id  # 添加task_id，确保每个任务的数据独立
+                task_id=task_id,  # 添加task_id，确保每个任务的数据独立
             )
-            
+
             # 保存文件路径信息（如果有）
             # 兼容多种字段名
             if "json_path" in policy_data:
                 policy.json_local_path = policy_data.get("json_path")
             elif "json_local_path" in policy_data:
                 policy.json_local_path = policy_data.get("json_local_path")
-                
+
             if "markdown_path" in policy_data:
                 policy.markdown_local_path = policy_data.get("markdown_path")
             elif "markdown_local_path" in policy_data:
                 policy.markdown_local_path = policy_data.get("markdown_local_path")
-                
+
             if "docx_path" in policy_data:
                 policy.docx_local_path = policy_data.get("docx_path")
             elif "docx_local_path" in policy_data:
                 policy.docx_local_path = policy_data.get("docx_local_path")
-            
+
             db.add(policy)
             db.flush()  # 获取policy.id
-            
+
             # 保存附件（如果有）
             attachments = policy_data.get("attachments", [])
             if attachments:
@@ -154,53 +166,65 @@ class PolicyService:
                         file_url=att_data.get("file_url", ""),
                         file_size=att_data.get("file_size", 0),
                         file_type=att_data.get("file_ext", ""),
-                        storage_path=att_data.get("storage_path", "")
+                        storage_path=att_data.get("storage_path", ""),
                     )
                     db.add(attachment)
                 policy.attachment_count = len(attachments)
-            
+
             # 标记为已索引（PostgreSQL会自动维护GIN索引）
             policy.is_indexed = True
-            
+
             db.commit()
             db.refresh(policy)
-            
+
             logger.info(f"政策保存成功: {policy.title} (ID: {policy.id})")
             return policy
-            
+
         except IntegrityError:
             db.rollback()
-            logger.warning(f"政策已存在（唯一约束冲突）: {policy_data.get('title', 'Unknown')} (Task: {task_id})")
+            logger.warning(
+                f"政策已存在（唯一约束冲突）: {policy_data.get('title', 'Unknown')} (Task: {task_id})"
+            )
             # 尝试查找并返回现有政策（基于task_id）
             if task_id:
-                existing_policy = db.query(PolicyModel).filter(
-                    PolicyModel.title == policy_data.get("title", ""),
-                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                    PolicyModel.pub_date == pub_date,
-                    PolicyModel.task_id == task_id
-                ).first()
+                existing_policy = (
+                    db.query(PolicyModel)
+                    .filter(
+                        PolicyModel.title == policy_data.get("title", ""),
+                        PolicyModel.source_url
+                        == policy_data.get("source", policy_data.get("url", "")),
+                        PolicyModel.pub_date == pub_date,
+                        PolicyModel.task_id == task_id,
+                    )
+                    .first()
+                )
             else:
-                existing_policy = db.query(PolicyModel).filter(
-                    PolicyModel.title == policy_data.get("title", ""),
-                    PolicyModel.source_url == policy_data.get("source", policy_data.get("url", "")),
-                    PolicyModel.pub_date == pub_date,
-                    PolicyModel.task_id.is_(None)
-                ).first()
+                existing_policy = (
+                    db.query(PolicyModel)
+                    .filter(
+                        PolicyModel.title == policy_data.get("title", ""),
+                        PolicyModel.source_url
+                        == policy_data.get("source", policy_data.get("url", "")),
+                        PolicyModel.pub_date == pub_date,
+                        PolicyModel.task_id.is_(None),
+                    )
+                    .first()
+                )
             return existing_policy
-            
+
         except Exception as e:
             db.rollback()
             logger.error(f"保存政策失败: {e}", exc_info=True)
             return None
-    
+
     def save_policies_batch(
         self,
         db: Session,
         policies_data: List[Dict[str, Any]],
-        task_id: Optional[int] = None
+        task_id: Optional[int] = None,
     ) -> Dict[str, int]:
         """批量保存政策
-        
+
         Returns:
             {
                 "total": 总数,
@@ -209,19 +233,17 @@ class PolicyService:
                 "failed": 失败数
             }
         """
-        result = {
-            "total": len(policies_data),
-            "saved": 0,
-            "skipped": 0,
-            "failed": 0
-        }
-        
+        result = {"total": len(policies_data), "saved": 0, "skipped": 0, "failed": 0}
+
         for policy_data in policies_data:
             try:
                 policy = self.save_policy(db, policy_data, task_id)
                 if policy:
                     # 检查是否是新创建的
-                    if policy.crawl_time and (datetime.now() - policy.crawl_time).total_seconds() < 5:
+                    if (
+                        policy.crawl_time
+                        and (datetime.now() - policy.crawl_time).total_seconds() < 5
+                    ):
                         result["saved"] += 1
                     else:
                         result["skipped"] += 1
@@ -230,13 +252,13 @@ class PolicyService:
             except Exception as e:
                 logger.error(f"批量保存政策失败: {e}")
                 result["failed"] += 1
-        
+
         return result
-    
+
     def get_policy_by_id(self, db: Session, policy_id: int) -> Optional[PolicyModel]:
         """根据ID获取政策"""
         return db.query(PolicyModel).filter(PolicyModel.id == policy_id).first()
-    
+
     def get_policies(
         self,
         db: Session,
@@ -249,14 +271,14 @@ class PolicyService:
         keyword: Optional[str] = None,
         publisher: Optional[str] = None,
         source_name: Optional[str] = None,
-        task_id: Optional[int] = None
+        task_id: Optional[int] = None,
     ) -> tuple[List[PolicyModel], int]:
         """获取政策列表（带筛选）
-        
+
         Args:
             source_name: 数据源名称筛选（如"政府信息公开平台"、"政策法规库"）
             task_id: 任务ID筛选，只返回该任务爬取的政策
-        
+
         Returns:
             (政策列表, 总数)
         """
@@ -265,7 +287,7 @@ class PolicyService:
             query = db.query(PolicyModel).filter(PolicyModel.task_id == task_id)
         else:
             query = db.query(PolicyModel)
-        
+
         # 应用筛选条件
         if category:
             query = query.filter(PolicyModel.category == category)
@@ -284,109 +306,112 @@ class PolicyService:
             # 对于简单查询，使用LIKE搜索；对于复杂查询，可以调用SearchService
             keyword_pattern = f"%{keyword}%"
             query = query.filter(
-                (PolicyModel.title.ilike(keyword_pattern)) |
-                (PolicyModel.content.ilike(keyword_pattern)) |
-                (PolicyModel.keywords.ilike(keyword_pattern))
+                (PolicyModel.title.ilike(keyword_pattern))
+                | (PolicyModel.content.ilike(keyword_pattern))
+                | (PolicyModel.keywords.ilike(keyword_pattern))
             )
-        
+
         # 由于policy.task_id直接关联任务，不需要去重
-        
+
         # 获取总数
         total = query.count()
-        
+
         # 分页和排序
-        policies = query.order_by(PolicyModel.pub_date.desc()).offset(skip).limit(limit).all()
-        
+        policies = (
+            query.order_by(PolicyModel.pub_date.desc()).offset(skip).limit(limit).all()
+        )
+
         return policies, total
-    
+
     def delete_policy(self, db: Session, policy_id: int) -> bool:
         """删除政策"""
         try:
             policy = db.query(PolicyModel).filter(PolicyModel.id == policy_id).first()
             if not policy:
                 return False
-            
+
             # 删除关联的附件记录
             db.query(Attachment).filter(Attachment.policy_id == policy_id).delete()
-            
+
             # 删除文件（如果需要）
             # TODO: 调用storage_service删除文件
-            
+
             # 删除政策记录
             db.delete(policy)
             db.commit()
-            
+
             logger.info(f"政策已删除: {policy_id}")
             return True
-            
+
         except Exception as e:
             db.rollback()
             logger.error(f"删除政策失败: {e}", exc_info=True)
             return False
-    
-    def get_categories(self, db: Session, source_name: Optional[str] = None) -> List[str]:
+
+    def get_categories(
+        self, db: Session, source_name: Optional[str] = None
+    ) -> List[str]:
         """获取分类列表
-        
+
         Args:
             db: 数据库会话
             source_name: 可选的数据源名称，如果提供则只返回该数据源的分类
-        
+
         Returns:
             分类列表
         """
-        query = db.query(PolicyModel.category).distinct().filter(
-            PolicyModel.category.isnot(None),
-            PolicyModel.category != ""
+        query = (
+            db.query(PolicyModel.category)
+            .distinct()
+            .filter(PolicyModel.category.isnot(None), PolicyModel.category != "")
         )
-        
+
         # 如果指定了数据源，只返回该数据源的分类
         if source_name:
             query = query.filter(PolicyModel.source_name == source_name)
-        
+
         categories = query.all()
         return [cat[0] for cat in categories if cat[0]]
-    
+
     def get_levels(self, db: Session) -> List[str]:
         """获取所有效力级别列表"""
-        levels = db.query(PolicyModel.level).distinct().filter(
-            PolicyModel.level.isnot(None),
-            PolicyModel.level != ""
-        ).all()
+        levels = (
+            db.query(PolicyModel.level)
+            .distinct()
+            .filter(PolicyModel.level.isnot(None), PolicyModel.level != "")
+            .all()
+        )
         return [level[0] for level in levels]
-    
+
     def get_source_names(self, db: Session) -> List[str]:
         """获取所有数据源名称列表"""
-        source_names = db.query(PolicyModel.source_name).distinct().filter(
-            PolicyModel.source_name.isnot(None),
-            PolicyModel.source_name != ""
-        ).all()
+        source_names = (
+            db.query(PolicyModel.source_name)
+            .distinct()
+            .filter(PolicyModel.source_name.isnot(None), PolicyModel.source_name != "")
+            .all()
+        )
         return [name[0] for name in source_names]
-    
+
     def _parse_date(self, date_str: Optional[str]) -> Optional[date]:
         """解析日期字符串"""
         if not date_str:
             return None
-        
+
         try:
             # 尝试多种日期格式
-            formats = [
-                "%Y-%m-%d",
-                "%Y/%m/%d",
-                "%Y-%m-%d %H:%M:%S",
-                "%Y年%m月%d日"
-            ]
-            
+            formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y年%m月%d日"]
+
             for fmt in formats:
                 try:
                     dt = datetime.strptime(date_str.strip(), fmt)
                     return dt.date()
                 except ValueError:
                     continue
-            
+
             logger.warning(f"无法解析日期: {date_str}")
             return None
-            
+
         except Exception as e:
             logger.error(f"日期解析错误: {e}")
             return None
-

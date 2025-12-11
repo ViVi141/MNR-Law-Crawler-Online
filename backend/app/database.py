@@ -43,13 +43,20 @@ def init_db():
     """初始化数据库（创建所有表）"""
     # 导入所有模型以确保它们被注册
     from .models import (
-        User, Policy, Task, TaskPolicy, Attachment,
-        ScheduledTask, ScheduledTaskRun, SystemConfig, BackupRecord
+        User,
+        Policy,
+        Task,
+        TaskPolicy,
+        Attachment,
+        ScheduledTask,
+        ScheduledTaskRun,
+        SystemConfig,
+        BackupRecord,
     )
+
     Base.metadata.create_all(bind=engine)
 
 
 def drop_db():
     """删除所有表（谨慎使用）"""
     Base.metadata.drop_all(bind=engine)
-

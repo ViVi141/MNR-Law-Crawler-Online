@@ -1,6 +1,7 @@
 """
 Pytest配置和fixtures
 """
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -20,11 +21,13 @@ def db_session():
     """创建测试数据库会话"""
     engine = create_engine(
         TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False} if "sqlite" in TEST_DATABASE_URL else {}
+        connect_args=(
+            {"check_same_thread": False} if "sqlite" in TEST_DATABASE_URL else {}
+        ),
     )
     Base.metadata.create_all(bind=engine)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
+
     session = TestingSessionLocal()
     try:
         yield session
@@ -36,12 +39,13 @@ def db_session():
 @pytest.fixture(scope="function")
 def client(db_session):
     """创建测试客户端"""
+
     def override_get_db():
         try:
             yield db_session
         finally:
             pass
-    
+
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
         yield test_client
@@ -53,12 +57,12 @@ def test_user(db_session):
     """创建测试用户"""
     from app.models.user import User
     from app.services.auth_service import AuthService
-    
+
     user = AuthService.create_default_user(
         db_session,
         username="testuser",
         password="testpass123",
-        email="test@example.com"
+        email="test@example.com",
     )
     return user
 
@@ -67,9 +71,7 @@ def test_user(db_session):
 def auth_token(client, test_user):
     """获取认证token"""
     response = client.post(
-        "/api/auth/login",
-        json={"username": "testuser", "password": "testpass123"}
+        "/api/auth/login", json={"username": "testuser", "password": "testpass123"}
     )
     assert response.status_code == 200
     return response.json()["access_token"]
-

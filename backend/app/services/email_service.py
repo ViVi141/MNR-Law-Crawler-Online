@@ -16,39 +16,57 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     """邮件服务（支持实时配置更新）"""
-    
+
     def __init__(self):
         """初始化邮件服务"""
         self._load_config()
-    
+
     def _load_config(self, db: Optional[Any] = None):
         """从数据库或settings加载配置（实时更新）"""
         # 尝试从数据库加载配置
         if db is None:
             try:
                 from ..database import SessionLocal
+
                 db = SessionLocal()
                 try:
                     from .config_service import ConfigService
+
                     config_service = ConfigService()
-                    email_config = config_service.get_email_config(db, include_password=True)
-                    
+                    email_config = config_service.get_email_config(
+                        db, include_password=True
+                    )
+
                     self.enabled = email_config.get("enabled", settings.email_enabled)
-                    self.smtp_host = email_config.get("smtp_host") or settings.email_smtp_host
-                    self.smtp_port = email_config.get("smtp_port") or settings.email_smtp_port
-                    self.smtp_user = email_config.get("smtp_user") or settings.email_smtp_user
-                    self.smtp_password = email_config.get("smtp_password") or settings.email_smtp_password
-                    self.from_address = email_config.get("from_address") or settings.email_from_address
+                    self.smtp_host = (
+                        email_config.get("smtp_host") or settings.email_smtp_host
+                    )
+                    self.smtp_port = (
+                        email_config.get("smtp_port") or settings.email_smtp_port
+                    )
+                    self.smtp_user = (
+                        email_config.get("smtp_user") or settings.email_smtp_user
+                    )
+                    self.smtp_password = (
+                        email_config.get("smtp_password")
+                        or settings.email_smtp_password
+                    )
+                    self.from_address = (
+                        email_config.get("from_address") or settings.email_from_address
+                    )
                     to_addresses_str = email_config.get("to_addresses", "[]")
                     if isinstance(to_addresses_str, str):
                         import json
+
                         try:
                             self.to_addresses = json.loads(to_addresses_str)
                         except Exception:
                             self.to_addresses = settings.email_to_addresses_list
                     else:
-                        self.to_addresses = to_addresses_str or settings.email_to_addresses_list
-                    
+                        self.to_addresses = (
+                            to_addresses_str or settings.email_to_addresses_list
+                        )
+
                     db.close()
                     return
                 except Exception as e:
@@ -56,7 +74,7 @@ class EmailService:
                     db.close()
             except Exception as e:
                 logger.warning(f"无法连接数据库加载邮件配置，使用默认配置: {e}")
-        
+
         # 从settings加载默认配置
         self.enabled = settings.email_enabled
         self.smtp_host = settings.email_smtp_host
@@ -65,63 +83,59 @@ class EmailService:
         self.smtp_password = settings.email_smtp_password
         self.from_address = settings.email_from_address
         self.to_addresses = settings.email_to_addresses_list
-        
+
     def reload_config(self, db: Optional[Any] = None):
         """重新加载配置（用于配置更新后）"""
         self._load_config(db)
         logger.info("邮件服务配置已重新加载")
-    
+
     def is_enabled(self, db: Optional[Any] = None) -> bool:
         """检查邮件服务是否启用且有收件人（实时检查配置）"""
         # 如果提供了db，重新加载配置
         if db is not None:
             self._load_config(db)
-        
-        return self.enabled and all([
-            self.smtp_host,
-            self.smtp_user,
-            self.smtp_password,
-            self.from_address,
-            self.to_addresses  # 必须有收件人地址
-        ])
-    
+
+        return self.enabled and all(
+            [
+                self.smtp_host,
+                self.smtp_user,
+                self.smtp_password,
+                self.from_address,
+                self.to_addresses,  # 必须有收件人地址
+            ]
+        )
+
     async def send_email(
         self,
         subject: str,
         body: str,
         to_addresses: Optional[List[str]] = None,
         body_html: Optional[str] = None,
-        db: Optional[Any] = None
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """发送邮件（支持实时配置更新）
-        
+
         Args:
             subject: 邮件主题
             body: 邮件正文（纯文本）
             to_addresses: 收件人地址列表（如果为None，使用配置中的默认收件人）
             body_html: 邮件正文（HTML格式，可选）
             db: 数据库会话（可选，如果提供则实时加载配置）
-        
+
         Returns:
             发送结果字典
         """
         # 如果提供了db，重新加载配置以确保使用最新配置
         if db is not None:
             self._load_config(db)
-        
+
         if not self.is_enabled(db):
-            return {
-                "success": False,
-                "message": "邮件服务未启用或配置不完整"
-            }
-        
+            return {"success": False, "message": "邮件服务未启用或配置不完整"}
+
         to_list = to_addresses or self.to_addresses
         if not to_list:
-            return {
-                "success": False,
-                "message": "未指定收件人地址"
-            }
-        
+            return {"success": False, "message": "未指定收件人地址"}
+
         try:
             # 创建邮件消息
             if body_html:
@@ -130,24 +144,24 @@ class EmailService:
                 msg.attach(MIMEText(body_html, "html", "utf-8"))
             else:
                 msg = MIMEText(body, "plain", "utf-8")
-            
+
             msg["Subject"] = subject
             msg["From"] = self.from_address
             msg["To"] = ", ".join(to_list)
-            
+
             # 发送邮件
             # 端口587使用STARTTLS（先建立普通连接，然后升级到TLS）
             # 端口465使用SSL/TLS（直接建立TLS连接）
             use_tls = self.smtp_port == 465
             start_tls = self.smtp_port == 587
-            
+
             smtp = aiosmtplib.SMTP(
                 hostname=self.smtp_host,
                 port=self.smtp_port,
                 use_tls=use_tls,
-                start_tls=start_tls  # 如果为True，connect()会自动处理STARTTLS，无需手动调用
+                start_tls=start_tls,  # 如果为True，connect()会自动处理STARTTLS，无需手动调用
             )
-            
+
             await smtp.connect()
             # 注意：如果start_tls=True，connect()已经自动处理了STARTTLS升级
             # 不要再手动调用 starttls()，否则会报错 "Connection already using TLS"
@@ -160,21 +174,21 @@ class EmailService:
             except Exception:
                 # 邮件已成功发送，quit()失败不影响整体结果
                 pass
-            
+
             logger.info(f"邮件发送成功: {subject} -> {', '.join(to_list)}")
             return {
                 "success": True,
                 "message": f"邮件已发送到 {', '.join(to_list)}",
-                "to": to_list
+                "to": to_list,
             }
         except Exception as e:
             logger.error(f"发送邮件失败: {e}", exc_info=True)
             return {
                 "success": False,
                 "message": f"发送邮件失败: {str(e)}",
-                "error": str(e)
+                "error": str(e),
             }
-    
+
     async def send_task_completion_notification(
         self,
         task_name: str,
@@ -186,10 +200,10 @@ class EmailService:
         to_addresses: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        db: Optional[Any] = None
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """发送任务完成通知（支持实时配置更新）
-        
+
         Args:
             task_name: 任务名称
             task_status: 任务状态 (completed/failed/paused)
@@ -203,23 +217,24 @@ class EmailService:
             db: 数据库会话（可选，如果提供则实时加载配置）
         """
         if not self.is_enabled(db):
-            return {
-                "success": False,
-                "message": "邮件服务未启用或未配置收件人"
-            }
-        
+            return {"success": False, "message": "邮件服务未启用或未配置收件人"}
+
         status_map = {
             "completed": ("成功", "green", "✓"),
             "failed": ("失败", "red", "✗"),
-            "paused": ("已暂停", "orange", "⏸")
+            "paused": ("已暂停", "orange", "⏸"),
         }
-        status_text, status_color, status_icon = status_map.get(task_status, ("未知", "gray", "?"))
-        
-        end_time_str = (end_time or datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-        start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else "N/A"
-        
+        status_text, status_color, status_icon = status_map.get(
+            task_status, ("未知", "gray", "?")
+        )
+
+        end_time_str = (end_time or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        start_time_str = (
+            start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
+        )
+
         subject = f"[MNR Law Crawler] 任务{status_text}: {task_name}"
-        
+
         body = f"""
 任务执行通知
 
@@ -233,10 +248,10 @@ class EmailService:
 - 成功数量: {success_count}
 - 失败数量: {failed_count}
 """
-        
+
         if error_message:
             body += f"\n错误信息:\n{error_message}\n"
-        
+
         body_html = f"""
 <html>
 <head><meta charset="utf-8"></head>
@@ -269,7 +284,7 @@ class EmailService:
             </tr>
         </table>
 """
-        
+
         if error_message:
             body_html += f"""
         <h3 style="color: #d32f2f; border-bottom: 1px solid #eee; padding-bottom: 5px;">错误信息</h3>
@@ -277,7 +292,7 @@ class EmailService:
             <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">{error_message}</pre>
         </div>
 """
-        
+
         body_html += """
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #999; font-size: 12px; text-align: center;">
@@ -287,9 +302,9 @@ class EmailService:
 </body>
 </html>
 """
-        
+
         return await self.send_email(subject, body, to_addresses, body_html, db)
-    
+
     async def send_backup_notification(
         self,
         backup_type: str,
@@ -300,10 +315,10 @@ class EmailService:
         to_addresses: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        db: Optional[Any] = None
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """发送备份完成通知（支持实时配置更新）
-        
+
         Args:
             backup_type: 备份类型 (full/incremental)
             backup_path: 备份文件路径
@@ -316,21 +331,20 @@ class EmailService:
             db: 数据库会话（可选，如果提供则实时加载配置）
         """
         if not self.is_enabled(db):
-            return {
-                "success": False,
-                "message": "邮件服务未启用或未配置收件人"
-            }
-        
+            return {"success": False, "message": "邮件服务未启用或未配置收件人"}
+
         status_text = "成功" if status == "completed" else "失败"
         status_color = "green" if status == "completed" else "red"
         status_icon = "✓" if status == "completed" else "✗"
-        
-        backup_time = (end_time or datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-        start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else "N/A"
+
+        backup_time = (end_time or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        start_time_str = (
+            start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
+        )
         backup_type_text = "完整备份" if backup_type == "full" else "增量备份"
-        
+
         subject = f"[MNR Law Crawler] 备份{status_text}: {backup_type_text}"
-        
+
         body = f"""
 数据库备份通知
 
@@ -341,10 +355,10 @@ class EmailService:
 文件路径: {backup_path}
 文件大小: {file_size}
 """
-        
+
         if error_message:
             body += f"\n错误信息:\n{error_message}\n"
-        
+
         body_html = f"""
 <html>
 <head><meta charset="utf-8"></head>
@@ -363,7 +377,7 @@ class EmailService:
             <p style="margin: 5px 0;"><strong>文件大小:</strong> <strong>{file_size}</strong></p>
         </div>
 """
-        
+
         if error_message:
             body_html += f"""
         <h3 style="color: #d32f2f; border-bottom: 1px solid #eee; padding-bottom: 5px;">错误信息</h3>
@@ -371,7 +385,7 @@ class EmailService:
             <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">{error_message}</pre>
         </div>
 """
-        
+
         body_html += """
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #999; font-size: 12px; text-align: center;">
@@ -381,32 +395,30 @@ class EmailService:
 </body>
 </html>
 """
-        
+
         return await self.send_email(subject, body, to_addresses, body_html, db)
-    
+
     async def send_system_notification(
         self,
         title: str,
         message: str,
         level: str = "info",  # info/warning/error
-        to_addresses: Optional[List[str]] = None
+        to_addresses: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """发送系统通知
-        
+
         Args:
             title: 通知标题
             message: 通知消息
             level: 通知级别 (info/warning/error)
             to_addresses: 收件人地址列表
         """
-        level_text = {
-            "info": "信息",
-            "warning": "警告",
-            "error": "错误"
-        }.get(level, "信息")
-        
+        level_text = {"info": "信息", "warning": "警告", "error": "错误"}.get(
+            level, "信息"
+        )
+
         subject = f"[MNR Law Crawler] {level_text}: {title}"
-        
+
         body = f"""
 系统通知
 
@@ -416,14 +428,10 @@ class EmailService:
 
 {message}
 """
-        
-        color_map = {
-            "info": "blue",
-            "warning": "orange",
-            "error": "red"
-        }
+
+        color_map = {"info": "blue", "warning": "orange", "error": "red"}
         color = color_map.get(level, "blue")
-        
+
         body_html = f"""
 <html>
 <head><meta charset="utf-8"></head>
@@ -437,7 +445,7 @@ class EmailService:
 </body>
 </html>
 """
-        
+
         return await self.send_email(subject, body, to_addresses, body_html)
 
 
@@ -451,4 +459,3 @@ def get_email_service() -> EmailService:
     if _email_service is None:
         _email_service = EmailService()
     return _email_service
-
