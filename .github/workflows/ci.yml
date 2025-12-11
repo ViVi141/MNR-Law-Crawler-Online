@@ -258,16 +258,21 @@ jobs:
           echo "验证依赖导入..."
           python -c "
           import sys
-          required_modules = [
-              'fastapi', 'sqlalchemy', 'pydantic', 'alembic',
-              'python-docx', 'aiofiles', 'aiosmtplib'
-          ]
+          # 模块名映射：安装包名 -> 导入名
+          required_modules = {
+              'fastapi': 'fastapi',
+              'sqlalchemy': 'sqlalchemy',
+              'pydantic': 'pydantic',
+              'alembic': 'alembic',
+              'python-docx': 'docx',  # python-docx 安装后导入名为 docx
+              'aiosmtplib': 'aiosmtplib'
+          }
           missing = []
-          for module in required_modules:
+          for package_name, import_name in required_modules.items():
               try:
-                  __import__(module.replace('-', '_'))
+                  __import__(import_name)
               except ImportError:
-                  missing.append(module)
+                  missing.append(package_name)
           if missing:
               print(f'❌ 缺少依赖: {missing}')
               sys.exit(1)
