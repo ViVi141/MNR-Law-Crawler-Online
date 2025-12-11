@@ -82,7 +82,7 @@ services:
       - postgres_secrets:/run/secrets:ro
       # 开发模式：取消注释以下行以启用热重载
       # - ./backend:/app
-    # 不暴露端口给外网，仅内部网络访问
+    # 不暴露后端端口，仅通过Docker内部网络访问
     # ports:
     #   - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -117,7 +117,9 @@ services:
       dockerfile: Dockerfile
       args:
         - BUILDKIT_INLINE_CACHE=1
-        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
+        # 使用相对路径，通过Nginx代理访问后端（Docker内部网络）
+        # 前端代码使用相对路径 /api/xxx，Nginx将代理到 backend:8000
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
     container_name: mnr-crawler-frontend
     restart: unless-stopped
     # 前端端口仅绑定到 localhost，供 WAF 的 Nginx 反向代理使用

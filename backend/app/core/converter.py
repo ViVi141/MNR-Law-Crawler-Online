@@ -245,7 +245,6 @@ class DocumentConverter:
                     # 获取原文件名（不含扩展名）
                     base_name = os.path.splitext(os.path.basename(doc_path))[0]
                     output_docx = f"{base_name}.docx"
-                    output_path = os.path.join(tmpdir, output_docx)
                     
                     # 使用 LibreOffice 转换为 DOCX（headless 模式，无界面）
                     # --headless: 无界面模式
@@ -275,7 +274,6 @@ class DocumentConverter:
                             return content
                         else:
                             print("    [X] DOCX转Markdown失败")
-            return None
                     else:
                         error_msg = result.stderr if result.stderr else "未知错误"
                         print(f"    [X] LibreOffice 转换失败: {error_msg}")
@@ -288,30 +286,29 @@ class DocumentConverter:
         
         # 方法2: 使用 poword（Windows 环境，备用方案）
         if POWORD_AVAILABLE:
-        try:
-            import tempfile
-            from poword.api.word import doc2docx
-            
-            with tempfile.TemporaryDirectory() as tmpdir:
-                output_name = 'converted.docx'
-                docx_path = os.path.join(tmpdir, output_name)
+            try:
+                import tempfile
+                from poword.api.word import doc2docx
                 
-                # 使用poword将DOC转换为DOCX
-                doc2docx(doc_path, tmpdir, output_name)
-                
-                if os.path.exists(docx_path):
-                    # 将DOCX转换为Markdown
-                    content = self.docx_to_markdown(docx_path)
-                    if content:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    output_name = 'converted.docx'
+                    docx_path = os.path.join(tmpdir, output_name)
+                    
+                    # 使用poword将DOC转换为DOCX
+                    doc2docx(doc_path, tmpdir, output_name)
+                    
+                    if os.path.exists(docx_path):
+                        # 将DOCX转换为Markdown
+                        content = self.docx_to_markdown(docx_path)
+                        if content:
                             print("    [OK] 使用 poword 转换DOC成功")
-                        return content
-                    else:
+                            return content
+                        else:
                             print("    [X] DOCX转Markdown失败")
-                        return None
-                else:
+                    else:
                         print("    [X] poword 转换失败，未生成DOCX文件")
                     
-        except Exception as e:
+            except Exception as e:
                 print(f"    [X] poword 转换异常: {e}")
         
         # 所有方法都失败
@@ -322,5 +319,5 @@ class DocumentConverter:
         else:
             print("    [X] 所有转换方法都失败了")
         
-            return None
+        return None
 

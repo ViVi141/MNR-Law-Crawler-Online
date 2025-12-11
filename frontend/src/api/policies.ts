@@ -41,7 +41,7 @@ export const policiesApi = {
       }
     }
     
-    return apiClient.get('/api/policies', { params: queryParams }).then((res) => {
+    return apiClient.get('/api/policies/', { params: queryParams }).then((res) => {
       const data = res.data
       // 转换响应格式：后端返回 skip/limit，前端期望 page/page_size
       // 同时处理日期字段：后端返回 pub_date，前端期望 publish_date

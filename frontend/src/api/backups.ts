@@ -23,7 +23,7 @@ export const backupsApi = {
       if (params.status) queryParams.status = params.status
     }
     
-    return apiClient.get('/api/backups', { params: queryParams }).then((res) => {
+    return apiClient.get('/api/backups/', { params: queryParams }).then((res) => {
       const data = res.data
       // 转换响应格式：后端返回 skip/limit，前端期望 page/page_size
       if (data.skip !== undefined && data.limit !== undefined) {
@@ -45,7 +45,7 @@ export const backupsApi = {
 
   // 创建备份
   createBackup(data?: { backup_type?: string }): Promise<BackupRecord> {
-    return apiClient.post('/api/backups', data || {}).then((res) => res.data)
+    return apiClient.post('/api/backups/', data || {}).then((res) => res.data)
   },
 
   // 恢复备份

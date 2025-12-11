@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动中...")
     
     # 初始化数据库表（如果不存在）
+    # 注意：使用多worker时，多个进程可能同时执行此代码
+    # 使用 try-except 捕获并发创建导致的错误
     try:
         # 导入所有模型以确保它们被注册到Base.metadata
         from .models import (
@@ -39,40 +41,61 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine, checkfirst=True)
         logger.info("数据库表检查完成")
     except Exception as e:
-        # 如果是表已存在的错误，可以忽略
-        error_msg = str(e)
-        if "already exists" in error_msg or "duplicate key" in error_msg.lower():
-            logger.warning(f"数据库表可能已存在，跳过创建: {error_msg}")
+        # 捕获所有可能的错误，包括并发创建导致的错误
+        error_msg = str(e).lower()
+        # 检查是否是"已存在"相关的错误（表、类型、索引等）
+        if any(keyword in error_msg for keyword in [
+            "already exists", "duplicate key", "pg_type_typname_nsp_index",
+            "relation", "table", "constraint"
+        ]):
+            logger.info(f"数据库表/类型已存在，跳过创建（这是正常的，特别是在多worker环境下）")
         else:
             logger.error(f"数据库表检查失败: {e}")
             logger.exception(e)
     
     # 创建默认用户（如果不存在）
+    # 使用数据库锁和错误处理来防止并发创建
     try:
         from .database import SessionLocal
         from .services.auth_service import AuthService
         from .models.user import User
+        from sqlalchemy import text
         
         db = SessionLocal()
         try:
-            # 检查是否有用户
-            user_count = db.query(User).count()
-            if user_count == 0:
-                # 创建默认用户
-                AuthService.create_default_user(
-                    db,
-                    username="admin",
-                    password="admin123",
-                    email="admin@example.com"
-                )
-                logger.info("创建默认用户: admin/admin123")
-            else:
-                logger.info(f"数据库中已有 {user_count} 个用户，跳过创建默认用户")
+            # 使用数据库锁来防止并发创建
+            # 先尝试获取锁（如果其他进程正在创建，会等待）
+            db.execute(text("SELECT pg_advisory_lock(123456)"))
+            try:
+                # 检查是否有用户（在锁保护下）
+                existing_user = db.query(User).filter(User.username == "admin").first()
+                if not existing_user:
+                    # 创建默认用户
+                    try:
+                        AuthService.create_default_user(
+                            db,
+                            username="admin",
+                            password="admin123",
+                            email="admin@example.com"
+                        )
+                        logger.info("创建默认用户: admin/admin123")
+                    except Exception as create_error:
+                        # 捕获创建时的重复键错误（可能其他进程已创建）
+                        error_msg = str(create_error).lower()
+                        if "duplicate key" in error_msg or "already exists" in error_msg:
+                            logger.info("默认用户已由其他进程创建，跳过")
+                        else:
+                            logger.warning(f"创建默认用户时出现错误: {create_error}")
+                else:
+                    logger.info("默认用户已存在，跳过创建")
+            finally:
+                # 释放锁
+                db.execute(text("SELECT pg_advisory_unlock(123456)"))
         except Exception as db_error:
-            # 如果是用户已存在的错误，可以忽略
-            error_msg = str(db_error)
-            if "already exists" in error_msg or "duplicate key" in error_msg.lower():
-                logger.info("默认用户已存在，跳过创建")
+            # 捕获所有数据库错误，包括锁相关的错误
+            error_msg = str(db_error).lower()
+            if "duplicate key" in error_msg or "already exists" in error_msg:
+                logger.info("默认用户已存在，跳过创建（并发创建检测）")
             else:
                 logger.warning(f"创建默认用户时出现错误（可忽略）: {db_error}")
         finally:

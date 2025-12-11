@@ -165,33 +165,102 @@ jobs:
           JWT_SECRET_KEY: test-secret-key-for-ci
           PYTHONPATH: .
         run: |
-          # 如果有测试文件，运行测试
-          if [ -f "pytest.ini" ] || [ -d "tests" ]; then
-            pip install pytest pytest-asyncio httpx
-            pytest -v --tb=short || echo "测试失败或未找到测试"
+          echo "=== 运行后端测试 ==="
+          pip install pytest pytest-asyncio httpx pytest-cov
+          
+          # 验证应用可以正常导入
+          echo "验证应用导入..."
+          python -c "from app.main import app; print('✅ 应用可以正常导入')" || exit 1
+          
+          # 验证所有关键模块可以导入
+          echo "验证关键模块导入..."
+          python -c "
+          from app.database import engine, SessionLocal
+          from app.models import User, Task, Policy, BackupRecord
+          from app.services import TaskService, AuthService, PolicyService, BackupService
+          print('✅ 所有关键模块导入成功')
+          " || exit 1
+          
+          # 验证数据库连接
+          echo "验证数据库连接..."
+          python -c "
+          from app.database import engine
+          from sqlalchemy import text
+          with engine.connect() as conn:
+              result = conn.execute(text('SELECT 1'))
+              assert result.fetchone()[0] == 1
+              print('✅ 数据库连接正常')
+          " || exit 1
+          
+          # 运行pytest测试（如果存在）
+          if [ -f "pytest.ini" ] || [ -d "tests" ] || [ -f "test_*.py" ]; then
+            echo "发现测试文件，运行pytest..."
+            pytest -v --tb=short --cov=app --cov-report=term-missing || exit 1
           else
-            echo "未找到测试文件，跳过测试"
-            # 至少验证应用可以导入
-            python -c "from app.main import app; print('✅ 应用可以正常导入')" || exit 1
+            echo "⚠️ 未找到pytest测试文件，但基础验证已通过"
           fi
+          
+          # 验证API路由注册
+          echo "验证API路由..."
+          python -c "
+          from app.main import app
+          routes = [r.path for r in app.routes]
+          required_routes = ['/api/health', '/api/auth/login', '/api/tasks/', '/api/policies/']
+          for route in required_routes:
+              if any(route in r for r in routes):
+                  print(f'✅ 路由 {route} 已注册')
+              else:
+                  print(f'⚠️ 路由 {route} 未找到')
+          print('✅ API路由验证完成')
+          " || exit 1
+          
+          echo "✅ 所有测试通过"
 
       - name: Check code quality
         working-directory: ./backend
         run: |
           echo "=== 代码质量检查 ==="
-          pip install flake8 black mypy || true
+          pip install flake8 black mypy pylint
           
-          # 代码格式检查（不强制失败）
-          echo "检查代码格式..."
-          black --check . || echo "⚠️ 代码格式检查跳过（非阻塞）"
+          # 语法错误检查（强制，不允许失败）
+          echo "检查Python语法错误..."
+          python -m py_compile app/main.py app/config.py || exit 1
+          find app -name "*.py" -exec python -m py_compile {} \; || exit 1
+          echo "✅ 语法检查通过"
           
-          # 语法错误检查（强制）
-          echo "检查语法错误..."
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --max-line-length=120 || echo "⚠️ 语法检查跳过（非阻塞）"
+          # 代码格式检查（强制）
+          echo "检查代码格式（Black）..."
+          black --check --diff . || (echo "❌ 代码格式不符合Black规范，请运行: black ." && exit 1)
+          echo "✅ 代码格式检查通过"
           
-          # 类型检查（可选）
-          echo "检查类型注解..."
-          mypy app --ignore-missing-imports --no-strict-optional || echo "⚠️ 类型检查跳过（非阻塞）"
+          # Flake8检查（强制关键错误）
+          echo "检查代码质量（Flake8）..."
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --max-line-length=120 --exclude=__pycache__,migrations || exit 1
+          echo "✅ Flake8关键错误检查通过"
+          
+          # 类型检查（警告但不阻塞）
+          echo "检查类型注解（MyPy）..."
+          mypy app --ignore-missing-imports --no-strict-optional --show-error-codes || echo "⚠️ 类型检查有警告（非阻塞）"
+          
+          # 检查导入依赖
+          echo "验证依赖导入..."
+          python -c "
+          import sys
+          required_modules = [
+              'fastapi', 'sqlalchemy', 'pydantic', 'alembic',
+              'python-docx', 'aiofiles', 'aiosmtplib'
+          ]
+          missing = []
+          for module in required_modules:
+              try:
+                  __import__(module.replace('-', '_'))
+              except ImportError:
+                  missing.append(module)
+          if missing:
+              print(f'❌ 缺少依赖: {missing}')
+              sys.exit(1)
+          print('✅ 所有依赖已安装')
+          " || exit 1
           
           echo "✅ 代码质量检查完成"
 
@@ -220,27 +289,64 @@ jobs:
       - name: Run linter
         working-directory: ./frontend
         run: |
-          npm run lint || echo "Linting check skipped"
+          echo "=== 运行前端代码检查 ==="
+          npm run lint || exit 1
+          echo "✅ 代码检查通过"
 
       - name: Build frontend
         working-directory: ./frontend
         env:
-          VITE_API_BASE_URL: /api  # 生产环境使用相对路径
+          VITE_API_BASE_URL: ""  # 生产环境使用空字符串（相对路径）
         run: |
           echo "=== 构建前端应用 ==="
-          npm run build
+          
+          # 验证TypeScript编译
+          echo "验证TypeScript编译..."
+          npm run build || exit 1
           
           # 验证构建产物
-          if [ -d "dist" ]; then
-            echo "✅ 构建成功，dist 目录已创建"
-            ls -lah dist/ | head -10
-          else
+          if [ ! -d "dist" ]; then
             echo "❌ 构建失败，dist 目录不存在"
             exit 1
           fi
+          echo "✅ 构建成功，dist 目录已创建"
           
           # 检查关键文件
+          echo "验证构建产物..."
           [ -f "dist/index.html" ] || (echo "❌ index.html 不存在" && exit 1)
+          [ -f "dist/assets/index-*.js" ] || (echo "❌ JavaScript文件不存在" && exit 1)
+          [ -f "dist/assets/index-*.css" ] || echo "⚠️ CSS文件可能不存在（如果使用内联样式）"
+          
+          # 验证index.html内容
+          echo "验证index.html内容..."
+          grep -q "<!DOCTYPE html>" dist/index.html || (echo "❌ index.html格式错误" && exit 1)
+          grep -q "id=\"app\"" dist/index.html || (echo "❌ Vue应用根元素不存在" && exit 1)
+          
+          # 检查静态资源
+          echo "检查静态资源..."
+          if [ -d "dist/assets" ]; then
+            ASSET_COUNT=$(ls -1 dist/assets/*.js 2>/dev/null | wc -l)
+            if [ "$ASSET_COUNT" -eq 0 ]; then
+              echo "❌ 没有找到JavaScript资源文件"
+              exit 1
+            fi
+            echo "✅ 找到 $ASSET_COUNT 个JavaScript资源文件"
+          fi
+          
+          # 验证环境变量注入
+          echo "验证环境变量..."
+          if grep -q "VITE_API_BASE_URL" dist/index.html 2>/dev/null || grep -q "/api" dist/assets/*.js 2>/dev/null; then
+            echo "✅ API配置已正确注入"
+          else
+            echo "⚠️ 未检测到API配置（可能使用相对路径）"
+          fi
+          
+          # 显示构建统计
+          echo "=== 构建统计 ==="
+          du -sh dist/
+          find dist -type f | wc -l | xargs echo "文件总数:"
+          ls -lah dist/ | head -15
+          
           echo "✅ 构建验证通过"
 
   security-scan:

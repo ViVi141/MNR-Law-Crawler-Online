@@ -132,25 +132,38 @@ class AuthService:
     
     @staticmethod
     def create_default_user(db: Session, username: str, password: str, email: str) -> User:
-        """创建默认用户"""
+        """创建默认用户（带并发保护）"""
         # 检查用户是否已存在
         existing_user = db.query(User).filter(User.username == username).first()
         if existing_user:
             return existing_user
         
         # 创建新用户
-        hashed_password = AuthService.get_password_hash(password)
-        user = User(
-            username=username,
-            password_hash=hashed_password,
-            email=email,
-            is_active=True
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        logger.info(f"创建默认用户: {username}")
-        return user
+        try:
+            hashed_password = AuthService.get_password_hash(password)
+            user = User(
+                username=username,
+                password_hash=hashed_password,
+                email=email,
+                is_active=True
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            logger.info(f"创建默认用户: {username}")
+            return user
+        except Exception as e:
+            # 如果提交失败（可能是并发创建导致的重复键错误），回滚并重新查询
+            db.rollback()
+            error_msg = str(e).lower()
+            if "duplicate key" in error_msg or "already exists" in error_msg:
+                # 其他进程可能已创建，重新查询
+                existing_user = db.query(User).filter(User.username == username).first()
+                if existing_user:
+                    logger.info(f"用户 {username} 已由其他进程创建")
+                    return existing_user
+            # 重新抛出其他错误
+            raise
     
     @staticmethod
     def update_password(db: Session, user: User, old_password: str, new_password: str) -> bool:

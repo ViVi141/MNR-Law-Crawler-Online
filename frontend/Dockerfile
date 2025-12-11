@@ -25,7 +25,9 @@ RUN set -e; \
 COPY . .
 
 # 构建参数
-ARG VITE_API_BASE_URL=http://localhost:8000
+# 使用相对路径（空字符串），通过Nginx代理访问后端
+# 前端代码使用相对路径 /api/xxx，Nginx将代理到 Docker网络中的 backend:8000
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # 构建应用

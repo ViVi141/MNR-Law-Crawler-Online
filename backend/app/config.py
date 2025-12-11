@@ -3,7 +3,6 @@
 支持环境变量和配置文件
 """
 
-import os
 import logging
 from pathlib import Path
 from typing import Optional, Any
@@ -83,9 +82,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_file: str = Field(default="./logs/app.log", env="LOG_FILE")
     
-    # CORS配置
+    # CORS配置（允许前端直接访问）
     cors_origins: str = Field(
-        default='["http://localhost:3000", "http://localhost:8080"]',
+        default='["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000", "http://127.0.0.1:8080"]',
         env="CORS_ORIGINS"
     )
     

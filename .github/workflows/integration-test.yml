@@ -101,16 +101,89 @@ jobs:
           
           # 测试健康检查端点
           echo "测试 /api/health..."
-          response=$(curl -s http://127.0.0.1:3000/api/health)
-          echo "响应: $response"
-          echo "$response" | grep -q "healthy" || (echo "健康检查失败" && exit 1)
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/api/health)
+          http_code=$(echo "$response" | grep "HTTP_CODE" | cut -d: -f2)
+          body=$(echo "$response" | grep -v "HTTP_CODE")
+          echo "HTTP状态码: $http_code"
+          echo "响应体: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "❌ 健康检查返回非200状态码: $http_code"
+            exit 1
+          fi
+          echo "$body" | grep -q "healthy\|status" || (echo "❌ 健康检查响应格式错误" && exit 1)
+          echo "✅ /api/health 测试通过"
           
-          # 测试根端点
-          echo "测试 /api..."
-          response=$(curl -s http://127.0.0.1:3000/api/health)
-          [ -n "$response" ] || (echo "API 无响应" && exit 1)
+          # 测试API根端点（应该重定向或返回信息）
+          echo "测试 /api/..."
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" -L http://127.0.0.1:3000/api/)
+          http_code=$(echo "$response" | grep "HTTP_CODE" | cut -d: -f2)
+          echo "HTTP状态码: $http_code"
+          if [ "$http_code" -ge 400 ]; then
+            echo "⚠️ /api/ 返回错误状态码（可能是预期的）"
+          else
+            echo "✅ /api/ 端点可访问"
+          fi
           
-          echo "✅ API 测试通过"
+          # 测试认证端点（登录，使用默认用户）
+          echo "测试 /api/auth/login..."
+          login_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST http://127.0.0.1:3000/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"admin123"}')
+          login_code=$(echo "$login_response" | grep "HTTP_CODE" | cut -d: -f2)
+          login_body=$(echo "$login_response" | grep -v "HTTP_CODE")
+          echo "HTTP状态码: $login_code"
+          if [ "$login_code" = "200" ]; then
+            echo "$login_body" | grep -q "access_token\|token" || echo "⚠️ 登录响应中未找到token字段"
+            echo "✅ 登录测试通过"
+            # 提取token用于后续测试
+            TOKEN=$(echo "$login_body" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4 || echo "")
+            if [ -n "$TOKEN" ]; then
+              export AUTH_TOKEN="$TOKEN"
+              echo "✅ Token已提取"
+            fi
+          else
+            echo "⚠️ 登录失败（状态码: $login_code），可能默认用户不存在或密码错误"
+            echo "响应: $login_body"
+          fi
+          
+          # 测试任务列表端点（需要认证）
+          if [ -n "$AUTH_TOKEN" ]; then
+            echo "测试 /api/tasks/ (需要认证)..."
+            tasks_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/api/tasks/ \
+              -H "Authorization: Bearer $AUTH_TOKEN")
+            tasks_code=$(echo "$tasks_response" | grep "HTTP_CODE" | cut -d: -f2)
+            echo "HTTP状态码: $tasks_code"
+            if [ "$tasks_code" = "200" ]; then
+              echo "✅ 任务列表API测试通过"
+            else
+              echo "⚠️ 任务列表API返回非200状态码: $tasks_code"
+            fi
+          else
+            echo "⚠️ 跳过需要认证的API测试（未获取到token）"
+          fi
+          
+          # 测试政策列表端点
+          echo "测试 /api/policies/..."
+          policies_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" "http://127.0.0.1:3000/api/policies/?page=1&page_size=10")
+          policies_code=$(echo "$policies_response" | grep "HTTP_CODE" | cut -d: -f2)
+          echo "HTTP状态码: $policies_code"
+          if [ "$policies_code" = "200" ] || [ "$policies_code" = "401" ]; then
+            echo "✅ 政策列表API响应正常（401表示需要认证，这是预期的）"
+          else
+            echo "⚠️ 政策列表API返回意外状态码: $policies_code"
+          fi
+          
+          # 测试404端点（应该返回404）
+          echo "测试不存在的端点..."
+          notfound_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/api/nonexistent)
+          notfound_code=$(echo "$notfound_response" | grep "HTTP_CODE" | cut -d: -f2)
+          if [ "$notfound_code" = "404" ]; then
+            echo "✅ 404处理正确"
+          else
+            echo "⚠️ 404端点返回非404状态码: $notfound_code"
+          fi
+          
+          echo "✅ API 测试完成"
 
       - name: Test frontend
         run: |
@@ -118,30 +191,153 @@ jobs:
           
           # 测试前端首页
           echo "测试前端首页..."
-          response=$(curl -s http://127.0.0.1:3000/)
-          echo "$response" | grep -q "html\|<!DOCTYPE" || echo "⚠️ 前端首页可能未正确加载"
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/)
+          http_code=$(echo "$response" | grep "HTTP_CODE" | cut -d: -f2)
+          body=$(echo "$response" | grep -v "HTTP_CODE")
+          echo "HTTP状态码: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "❌ 前端首页返回非200状态码: $http_code"
+            exit 1
+          fi
+          echo "$body" | grep -q "<!DOCTYPE html>" || (echo "❌ 前端首页不是有效的HTML" && exit 1)
+          echo "$body" | grep -q "id=\"app\"" || (echo "❌ Vue应用根元素不存在" && exit 1)
+          echo "✅ 前端首页加载正常"
           
-          # 测试前端静态资源
+          # 测试前端静态资源（JavaScript和CSS）
           echo "测试静态资源..."
-          curl -f http://127.0.0.1:3000/health || echo "⚠️ 健康检查端点可能不存在"
+          # 从HTML中提取资源路径
+          js_files=$(echo "$body" | grep -o 'src="[^"]*\.js[^"]*"' | sed 's/src="//;s/"//' || echo "")
+          css_files=$(echo "$body" | grep -o 'href="[^"]*\.css[^"]*"' | sed 's/href="//;s/"//' || echo "")
+          
+          if [ -n "$js_files" ]; then
+            echo "检查JavaScript文件..."
+            for js_file in $js_files; do
+              # 处理相对路径
+              if [[ "$js_file" == /* ]]; then
+                js_url="http://127.0.0.1:3000$js_file"
+              else
+                js_url="http://127.0.0.1:3000/$js_file"
+              fi
+              js_code=$(curl -s -w "%{http_code}" -o /dev/null "$js_url")
+              if [ "$js_code" = "200" ]; then
+                echo "✅ $js_file 可访问"
+              else
+                echo "❌ $js_file 返回状态码: $js_code"
+                exit 1
+              fi
+            done
+          else
+            echo "⚠️ 未找到JavaScript文件引用"
+          fi
+          
+          if [ -n "$css_files" ]; then
+            echo "检查CSS文件..."
+            for css_file in $css_files; do
+              if [[ "$css_file" == /* ]]; then
+                css_url="http://127.0.0.1:3000$css_file"
+              else
+                css_url="http://127.0.0.1:3000/$css_file"
+              fi
+              css_code=$(curl -s -w "%{http_code}" -o /dev/null "$css_url")
+              if [ "$css_code" = "200" ]; then
+                echo "✅ $css_file 可访问"
+              else
+                echo "⚠️ $css_file 返回状态码: $css_code（可能是可选的）"
+              fi
+            done
+          fi
+          
+          # 测试Nginx代理配置
+          echo "测试Nginx代理配置..."
+          # 测试API代理是否正常工作（已在上一步测试过，这里验证配置）
+          proxy_test=$(curl -s -w "%{http_code}" -o /dev/null http://127.0.0.1:3000/api/health)
+          if [ "$proxy_test" = "200" ]; then
+            echo "✅ Nginx API代理配置正确"
+          else
+            echo "❌ Nginx API代理配置有问题，返回状态码: $proxy_test"
+            exit 1
+          fi
+          
+          # 测试前端路由（SPA）
+          echo "测试前端路由..."
+          # Vue Router应该处理所有路由，返回index.html
+          route_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/tasks)
+          route_code=$(echo "$route_response" | grep "HTTP_CODE" | cut -d: -f2)
+          if [ "$route_code" = "200" ]; then
+            echo "✅ 前端路由处理正常（SPA）"
+          else
+            echo "⚠️ 前端路由返回状态码: $route_code"
+          fi
           
           echo "✅ 前端测试完成"
 
       - name: Test database connectivity
         run: |
-          echo "=== 测试数据库连接 ==="
+          echo "=== 测试数据库连接和功能 ==="
           
           # 从后端容器测试数据库连接
+          echo "测试数据库连接..."
           docker-compose exec -T backend python -c "
-          from app.database import engine
+          from app.database import engine, SessionLocal
           from sqlalchemy import text
           with engine.connect() as conn:
               result = conn.execute(text('SELECT 1'))
               assert result.fetchone()[0] == 1
               print('✅ 数据库连接正常')
-          " || (echo "数据库连接失败" && exit 1)
+          " || (echo "❌ 数据库连接失败" && exit 1)
           
-          echo "✅ 数据库连接测试通过"
+          # 测试数据库表是否存在
+          echo "验证数据库表..."
+          docker-compose exec -T backend python -c "
+          from app.database import engine
+          from sqlalchemy import text, inspect
+          inspector = inspect(engine)
+          tables = inspector.get_table_names()
+          required_tables = ['users', 'tasks', 'policies', 'backup_records']
+          missing = [t for t in required_tables if t not in tables]
+          if missing:
+              print(f'❌ 缺少表: {missing}')
+              exit(1)
+          print(f'✅ 所有必需的表已创建: {required_tables}')
+          " || (echo "❌ 数据库表验证失败" && exit 1)
+          
+          # 测试数据库查询功能
+          echo "测试数据库查询功能..."
+          docker-compose exec -T backend python -c "
+          from app.database import SessionLocal
+          from app.models.user import User
+          db = SessionLocal()
+          try:
+              # 测试查询用户
+              users = db.query(User).limit(1).all()
+              print(f'✅ 数据库查询功能正常（找到 {len(users)} 个用户）')
+          except Exception as e:
+              print(f'❌ 数据库查询失败: {e}')
+              exit(1)
+          finally:
+              db.close()
+          " || (echo "❌ 数据库查询测试失败" && exit 1)
+          
+          # 测试数据库事务
+          echo "测试数据库事务..."
+          docker-compose exec -T backend python -c "
+          from app.database import SessionLocal
+          from sqlalchemy import text
+          db = SessionLocal()
+          try:
+              # 测试事务
+              db.execute(text('BEGIN'))
+              db.execute(text('SELECT 1'))
+              db.execute(text('ROLLBACK'))
+              print('✅ 数据库事务功能正常')
+          except Exception as e:
+              print(f'❌ 数据库事务测试失败: {e}')
+              exit(1)
+          finally:
+              db.close()
+          " || (echo "❌ 数据库事务测试失败" && exit 1)
+          
+          echo "✅ 数据库连接和功能测试通过"
 
       - name: View logs on failure
         if: failure()

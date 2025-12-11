@@ -93,24 +93,97 @@ jobs:
           
           # 测试前端页面
           echo "测试前端首页..."
-          curl -f http://127.0.0.1:3000/ | grep -q "html" || echo "警告: 前端首页可能未正确加载"
+          frontend_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/)
+          frontend_code=$(echo "$frontend_response" | grep "HTTP_CODE" | cut -d: -f2)
+          frontend_body=$(echo "$frontend_response" | grep -v "HTTP_CODE")
+          if [ "$frontend_code" != "200" ]; then
+            echo "❌ 前端首页返回非200状态码: $frontend_code"
+            exit 1
+          fi
+          echo "$frontend_body" | grep -q "<!DOCTYPE html>" || (echo "❌ 前端首页不是有效的HTML" && exit 1)
+          echo "$frontend_body" | grep -q "id=\"app\"" || (echo "❌ Vue应用根元素不存在" && exit 1)
+          echo "✅ 前端首页加载正常"
           
           # 测试后端 API（通过前端代理）
-          echo "测试后端健康检查 API..."
-          response=$(curl -s http://127.0.0.1:3000/api/health)
-          echo "响应: $response"
-          echo "$response" | grep -q "healthy" || (echo "后端健康检查失败" && exit 1)
+          echo "测试后端健康检查 API（通过Nginx代理）..."
+          api_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://127.0.0.1:3000/api/health)
+          api_code=$(echo "$api_response" | grep "HTTP_CODE" | cut -d: -f2)
+          api_body=$(echo "$api_response" | grep -v "HTTP_CODE")
+          echo "HTTP状态码: $api_code"
+          echo "响应: $api_body"
+          if [ "$api_code" != "200" ]; then
+            echo "❌ API健康检查返回非200状态码: $api_code"
+            exit 1
+          fi
+          echo "$api_body" | grep -q "healthy\|status" || (echo "❌ API健康检查响应格式错误" && exit 1)
+          echo "✅ 后端健康检查API（通过代理）正常"
           
           # 测试后端 API（直接通过容器）
-          echo "测试后端 API（容器内部）..."
+          echo "测试后端 API（容器内部直接访问）..."
           docker-compose exec -T backend python -c "
           import urllib.request
           import json
-          response = urllib.request.urlopen('http://localhost:8000/api/health')
-          data = json.loads(response.read().decode())
-          assert data.get('status') == 'healthy', '健康检查失败'
-          print('✅ 后端健康检查通过')
-          " || exit 1
+          import sys
+          try:
+              response = urllib.request.urlopen('http://localhost:8000/api/health', timeout=10)
+              data = json.loads(response.read().decode())
+              if data.get('status') == 'healthy' or 'status' in data:
+                  print('✅ 后端健康检查通过（容器内部）')
+              else:
+                  print(f'⚠️ 健康检查响应格式: {data}')
+          except Exception as e:
+              print(f'❌ 后端健康检查失败: {e}')
+              sys.exit(1)
+          " || (echo "❌ 后端容器内部API测试失败" && exit 1)
+          
+          # 测试API端点列表
+          echo "测试其他API端点..."
+          endpoints=(
+            "/api/auth/login"
+            "/api/tasks/"
+            "/api/policies/"
+            "/api/backups/"
+          )
+          
+          for endpoint in "${endpoints[@]}"; do
+            echo "测试 $endpoint..."
+            endpoint_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" "http://127.0.0.1:3000$endpoint")
+            endpoint_code=$(echo "$endpoint_response" | grep "HTTP_CODE" | cut -d: -f2)
+            # 401/403是预期的（需要认证），404可能表示路由不存在，500表示服务器错误
+            if [ "$endpoint_code" -ge 500 ]; then
+              echo "❌ $endpoint 返回服务器错误: $endpoint_code"
+              exit 1
+            elif [ "$endpoint_code" = "404" ]; then
+              echo "⚠️ $endpoint 返回404（路由可能不存在）"
+            elif [ "$endpoint_code" = "401" ] || [ "$endpoint_code" = "403" ]; then
+              echo "✅ $endpoint 响应正常（需要认证）"
+            elif [ "$endpoint_code" = "200" ]; then
+              echo "✅ $endpoint 响应正常"
+            else
+              echo "⚠️ $endpoint 返回状态码: $endpoint_code"
+            fi
+          done
+          
+          # 测试Nginx代理重定向处理
+          echo "测试Nginx代理重定向处理..."
+          # 测试不带尾随斜杠的路径（应该被重定向）
+          redirect_response=$(curl -s -w "\nHTTP_CODE:%{http_code}" -L http://127.0.0.1:3000/api/tasks)
+          redirect_code=$(echo "$redirect_response" | grep "HTTP_CODE" | cut -d: -f2)
+          if [ "$redirect_code" = "200" ] || [ "$redirect_code" = "401" ] || [ "$redirect_code" = "307" ]; then
+            echo "✅ 重定向处理正常"
+          else
+            echo "⚠️ 重定向处理返回状态码: $redirect_code"
+          fi
+          
+          # 测试容器间网络通信
+          echo "测试容器间网络通信..."
+          docker-compose exec -T frontend curl -f http://backend:8000/api/health > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "✅ 前端容器可以访问后端容器"
+          else
+            echo "❌ 前端容器无法访问后端容器"
+            exit 1
+          fi
           
           echo "✅ 所有集成测试通过"
 

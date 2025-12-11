@@ -27,7 +27,7 @@ export const scheduledTasksApi = {
       if (params.is_enabled !== undefined) queryParams.is_enabled = params.is_enabled
     }
     
-    return apiClient.get('/api/scheduled-tasks', { params: queryParams }).then((res) => {
+    return apiClient.get('/api/scheduled-tasks/', { params: queryParams }).then((res) => {
       const data = res.data
       // 转换响应格式：后端返回 skip/limit，前端期望 page/page_size
       if (data.skip !== undefined && data.limit !== undefined) {
@@ -49,7 +49,7 @@ export const scheduledTasksApi = {
 
   // 创建定时任务
   createScheduledTask(data: ScheduledTaskCreateRequest): Promise<ScheduledTask> {
-    return apiClient.post('/api/scheduled-tasks', data).then((res) => res.data)
+    return apiClient.post('/api/scheduled-tasks/', data).then((res) => res.data)
   },
 
   // 更新定时任务

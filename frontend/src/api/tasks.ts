@@ -12,7 +12,7 @@ export interface TaskListParams {
 export const tasksApi = {
   // 获取任务列表
   getTasks(params?: TaskListParams): Promise<TaskListResponse> {
-    return apiClient.get('/api/tasks', { params }).then((res) => res.data)
+    return apiClient.get('/api/tasks/', { params }).then((res) => res.data)
   },
 
   // 获取任务详情
@@ -22,7 +22,7 @@ export const tasksApi = {
 
   // 创建任务
   createTask(data: TaskCreateRequest, autoStart: boolean = true): Promise<Task> {
-    return apiClient.post(`/api/tasks?auto_start=${autoStart}`, data).then((res) => res.data)
+    return apiClient.post(`/api/tasks/?auto_start=${autoStart}`, data).then((res) => res.data)
   },
 
   // 启动任务

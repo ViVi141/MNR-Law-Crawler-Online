@@ -66,6 +66,7 @@ loguru>=0.7.2  # 可选的增强日志库
 # 测试（开发环境）
 pytest>=7.4.3
 pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0  # 测试覆盖率
 httpx>=0.25.2  # 用于测试FastAPI
 
 # 开发工具
