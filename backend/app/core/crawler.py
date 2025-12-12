@@ -23,10 +23,8 @@ from .mnr_spider import MNRSpider
 # 使用模块级logger
 logger = logging.getLogger(__name__)
 
-# 文件编号锁和计数器（类级别，所有实例共享）
+# 文件编号锁（类级别，所有实例共享）
 _file_number_lock = threading.Lock()
-_markdown_counter = 0
-_file_counter = 0
 
 # 自然资源部分类配置
 MNR_CATEGORIES = {
@@ -452,7 +450,9 @@ class PolicyCrawler:
                         category=category_name,
                         level=level,
                         validity=validity,
-                        crawl_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        crawl_time=datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
                     )
                     # 保存数据源信息到policy对象（通过添加自定义属性）
                     policy._data_source = data_source
@@ -893,6 +893,8 @@ class PolicyCrawler:
 
             # 保存文件路径到policy对象，以便后续保存到数据库
             policy.markdown_path = md_filepath
+            if callback:
+                callback(f"  [OK] Markdown已保存: {md_filename}")
             logger.debug(f"Markdown已保存: {md_filepath}")
 
         except Exception as e:
@@ -989,9 +991,6 @@ class PolicyCrawler:
 
             # 保存文件路径到policy对象，以便后续保存到数据库
             policy.docx_path = docx_filepath
-
-            if callback:
-                callback(f"  [OK] DOCX已保存: {docx_filename}")
             logger.debug(f"DOCX已保存: {docx_filepath}")
 
         except Exception as e:
@@ -1298,7 +1297,8 @@ class PolicyCrawler:
             log_dir_path = Path(log_dir)
             log_dir_path.mkdir(parents=True, exist_ok=True)
             failure_log_file = (
-                log_dir_path / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
+                log_dir_path
+                / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
             )
 
             if callback:
@@ -1328,7 +1328,8 @@ class PolicyCrawler:
             log_dir = self.config.get("log_dir", "logs")
             log_dir_path = Path(log_dir)
             failure_log_file = (
-                log_dir_path / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
+                log_dir_path
+                / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
             )
         else:
             failure_log_file = Path(failure_log_file)
@@ -1391,7 +1392,9 @@ class PolicyCrawler:
                             level="自然资源部",
                             validity="",
                             effective_date="",
-                            crawl_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            crawl_time=datetime.now(timezone.utc).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
                         )
                         failed_policies.append((policy, reason))
 

@@ -141,7 +141,22 @@ async def lifespan(app: FastAPI):
             def cleanup_job():
                 """清理过期临时文件的任务"""
                 try:
+                    # 执行垃圾回收，释放内存
+                    import gc
+
+                    gc.collect()
+
                     cleanup_service.cleanup_old_files(max_age_hours=24)
+
+                    # 记录内存使用情况
+                    import psutil
+
+                    process = psutil.Process()
+                    memory_info = process.memory_info()
+                    logger.info(
+                        f"内存清理完成，当前内存使用: {memory_info.rss / 1024 / 1024:.1f} MB"
+                    )
+
                 except Exception as e:
                     logger.error(f"文件清理任务执行失败: {e}", exc_info=True)
 

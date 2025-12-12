@@ -189,6 +189,100 @@ class EmailService:
                 "error": str(e),
             }
 
+    async def send_task_start_notification(
+        self,
+        task_name: str,
+        task_type: str,
+        data_sources: List[str],
+        keywords: Optional[str] = None,
+        date_range: Optional[str] = None,
+        max_pages: Optional[int] = None,
+        to_addresses: Optional[List[str]] = None,
+        start_time: Optional[datetime] = None,
+        db: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """发送任务开始通知
+
+        Args:
+            task_name: 任务名称
+            task_type: 任务类型
+            data_sources: 数据源列表
+            keywords: 关键词（如果有）
+            date_range: 日期范围（如果有）
+            max_pages: 最大页数（如果有）
+            to_addresses: 收件人地址列表
+            start_time: 开始时间
+            db: 数据库会话（可选，如果提供则实时加载配置）
+        """
+        if not self.is_enabled(db):
+            return {"success": False, "message": "邮件服务未启用或未配置收件人"}
+
+        start_time_str = (
+            start_time.strftime("%Y-%m-%d %H:%M:%S")
+            if start_time
+            else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+        subject = f"[MNR Law Crawler] 任务开始: {task_name}"
+
+        body = f"""
+任务开始执行通知
+
+任务名称: {task_name}
+任务类型: {task_type}
+开始时间: {start_time_str}
+
+配置信息:
+- 数据源: {', '.join(data_sources)}
+{f"- 关键词: {keywords}" if keywords else ""}
+{f"- 日期范围: {date_range}" if date_range else ""}
+{f"- 最大页数: {max_pages}" if max_pages else ""}
+
+任务已开始执行，您将收到完成通知。
+"""
+
+        body_html = f"""
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+        <h2 style="color: #007acc; border-bottom: 2px solid #007acc; padding-bottom: 10px;">
+            ▶ 任务开始执行
+        </h2>
+
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>任务名称:</strong> {task_name}</p>
+            <p style="margin: 5px 0;"><strong>任务类型:</strong> {task_type}</p>
+            <p style="margin: 5px 0;"><strong>开始时间:</strong> {start_time_str}</p>
+        </div>
+
+        <h3 style="color: #555; border-bottom: 1px solid #eee; padding-bottom: 5px;">配置信息</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+            <tr style="background-color: #f0f0f0;">
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>数据源</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{', '.join(data_sources)}</td>
+            </tr>
+            {"<tr><td style='padding: 8px; border: 1px solid #ddd;'><strong>关键词</strong></td><td style='padding: 8px; border: 1px solid #ddd;'>" + keywords + "</td></tr>" if keywords else ""}
+            {"<tr style='background-color: #f0f0f0;'><td style='padding: 8px; border: 1px solid #ddd;'><strong>日期范围</strong></td><td style='padding: 8px; border: 1px solid #ddd;'>" + date_range + "</td></tr>" if date_range else ""}
+            {"<tr><td style='padding: 8px; border: 1px solid #ddd;'><strong>最大页数</strong></td><td style='padding: 8px; border: 1px solid #ddd;'>" + str(max_pages) + "</td></tr>" if max_pages else ""}
+        </table>
+
+        <p style="color: #666; font-style: italic;">
+            任务已开始执行，您将收到完成通知。
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        return await self.send_email(
+            subject=subject,
+            body=body,
+            body_html=body_html,
+            to_addresses=to_addresses,
+            db=db,
+        )
+
     async def send_task_completion_notification(
         self,
         task_name: str,
@@ -228,7 +322,9 @@ class EmailService:
             task_status, ("未知", "gray", "?")
         )
 
-        end_time_str = (end_time or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+        end_time_str = (end_time or datetime.now(timezone.utc)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         start_time_str = (
             start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
         )
@@ -337,7 +433,9 @@ class EmailService:
         status_color = "green" if status == "completed" else "red"
         status_icon = "✓" if status == "completed" else "✗"
 
-        backup_time = (end_time or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+        backup_time = (end_time or datetime.now(timezone.utc)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         start_time_str = (
             start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
         )

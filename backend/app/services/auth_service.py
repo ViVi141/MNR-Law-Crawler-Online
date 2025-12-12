@@ -56,7 +56,9 @@ class AuthService:
         if expires_delta:
             expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+            expire = datetime.now(timezone.utc) + timedelta(
+                minutes=settings.jwt_expire_minutes
+            )
 
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(

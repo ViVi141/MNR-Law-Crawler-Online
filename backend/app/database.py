@@ -8,12 +8,13 @@ from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 from .config import settings
 
-# 创建数据库引擎
+# 创建数据库引擎 - 优化内存占用
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,  # 连接前检查
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,  # 减少连接池大小
+    max_overflow=10,  # 减少最大溢出连接
+    pool_recycle=300,  # 5分钟后回收连接，避免连接失效
     echo=settings.debug,  # 调试模式下打印SQL
 )
 

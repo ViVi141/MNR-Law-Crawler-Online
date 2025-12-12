@@ -111,6 +111,56 @@ class TaskService:
         task.start_time = datetime.now(timezone.utc)
         db.commit()
 
+        # 发送任务开始邮件通知（如果启用且有收件人）
+        try:
+            from .email_service import get_email_service
+
+            email_service = get_email_service()
+            # 传入db以实时加载配置
+            if email_service.is_enabled(db) and email_service.to_addresses:
+                import asyncio
+
+                # 准备任务配置信息
+                config = task.config_json or {}
+                data_sources = []
+                if "data_sources" in config:
+                    for ds in config["data_sources"]:
+                        if isinstance(ds, dict) and "name" in ds:
+                            data_sources.append(ds["name"])
+                        elif isinstance(ds, str):
+                            data_sources.append(ds)
+
+                keywords = config.get("keywords")
+                date_range = None
+                if config.get("start_date") and config.get("end_date"):
+                    date_range = f"{config['start_date']} ~ {config['end_date']}"
+                elif config.get("start_date"):
+                    date_range = f"从 {config['start_date']} 开始"
+                elif config.get("end_date"):
+                    date_range = f"至 {config['end_date']}"
+
+                max_pages = config.get("max_pages")
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        email_service.send_task_start_notification(
+                            task_name=task.task_name,
+                            task_type=task.task_type,
+                            data_sources=data_sources,
+                            keywords=keywords,
+                            date_range=date_range,
+                            max_pages=max_pages,
+                            start_time=task.start_time,
+                            db=db,  # 传入db以实时加载配置
+                        )
+                    )
+                finally:
+                    loop.close()
+        except Exception as e:
+            logger.warning(f"发送任务开始通知邮件失败: {e}")
+
         if background:
             # 在后台线程执行
             thread = threading.Thread(
@@ -152,7 +202,9 @@ class TaskService:
             if crawler and hasattr(crawler, "stop_requested"):
                 crawler.stop_requested = True
                 logger.info(f"已设置爬虫停止标志: {task_id}")
-            # 不立即删除实例，让爬虫自然退出
+            # 立即删除弱引用，让爬虫实例可以被垃圾回收
+            if task_id in self._crawler_instances:
+                del self._crawler_instances[task_id]
 
         logger.info(f"任务已停止: {task_id}")
         return True
@@ -571,6 +623,9 @@ class TaskService:
                 # 记录已保存文件的原始路径，用于后续清理
                 saved_file_paths = set()
 
+                # 任务运行中邮件通知检查
+                email_notified = False  # 标记是否已发送运行中邮件通知
+
                 # 在循环中检查停止标志
                 for policy in policies:
                     # 检查是否请求停止 - 线程安全
@@ -846,8 +901,6 @@ class TaskService:
 
                             # 检查是否是新创建的（简单判断：爬取时间很近）
                             # 确保时区一致：使用 timezone-aware datetime
-                            from datetime import timezone
-
                             now_utc = datetime.now(timezone.utc)
 
                             # 确保 crawl_time 是 timezone-aware
@@ -885,6 +938,47 @@ class TaskService:
                                     task.success_count = saved_count
                                     task.failed_count = failed_count + skipped_count
                                     db.commit()
+
+                                    # 检查是否需要发送任务运行中邮件通知（每处理50条检查一次）
+                                    if total_processed % 50 == 0 and not email_notified:
+                                        try:
+                                            from .email_service import get_email_service
+
+                                            email_service = get_email_service()
+                                            # 传入db以实时加载配置
+                                            if (
+                                                email_service.is_enabled(db)
+                                                and email_service.to_addresses
+                                            ):
+                                                import asyncio
+
+                                                loop = asyncio.new_event_loop()
+                                                asyncio.set_event_loop(loop)
+                                                try:
+                                                    loop.run_until_complete(
+                                                        email_service.send_task_completion_notification(
+                                                            task_name=task.task_name,
+                                                            task_status="running",
+                                                            policy_count=len(policies),
+                                                            success_count=saved_count,
+                                                            failed_count=failed_count
+                                                            + skipped_count,
+                                                            start_time=task.start_time,
+                                                            end_time=None,  # 运行中没有结束时间
+                                                            db=db,
+                                                        )
+                                                    )
+                                                    email_notified = True  # 标记已发送通知，避免重复发送
+                                                    logger.info(
+                                                        f"已发送任务运行中邮件通知: {task.task_name}"
+                                                    )
+                                                finally:
+                                                    loop.close()
+                                        except Exception as email_error:
+                                            logger.warning(
+                                                f"发送任务运行中邮件通知失败: {email_error}"
+                                            )
+
                             except Exception as e:
                                 logger.warning(f"更新任务统计失败: {e}")
                                 db.rollback()

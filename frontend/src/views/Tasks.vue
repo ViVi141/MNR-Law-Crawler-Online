@@ -74,9 +74,12 @@
               v-if="row.status === 'completed' && row.task_type === 'crawl_task'"
               link
               type="success"
+              :loading="downloading && downloadingTask?.id === row.id"
+              :disabled="downloading"
               @click="handleDownloadTaskFiles(row)"
             >
-              下载文件
+              <el-icon v-if="!downloading || downloadingTask?.id !== row.id"><Download /></el-icon>
+              {{ downloading && downloadingTask?.id === row.id ? '下载中...' : '下载文件' }}
             </el-button>
             <el-button
               v-if="row.status === 'running'"
@@ -364,7 +367,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Download } from '@element-plus/icons-vue'
 import { tasksApi, type TaskListParams } from '../api/tasks'
 import { configApi } from '../api/config'
 import type { Task, TaskCreateRequest } from '../types/task'
@@ -738,6 +741,7 @@ const handleCancel = async (task: Task) => {
 const downloadFormatDialog = ref(false)
 const downloadFormat = ref<'all' | 'markdown' | 'docx'>('all')
 const downloadingTask = ref<Task | null>(null)
+const downloading = ref(false)
 
 const handleDownloadTaskFiles = async (task: Task) => {
   // 显示格式选择对话框
@@ -752,36 +756,82 @@ const confirmDownload = async () => {
   }
   
   downloadFormatDialog.value = false
+  downloading.value = true
+  
+  let loadingInstance: ReturnType<typeof ElMessage> | null = null
   
   try {
-    ElMessage.info('正在打包文件，请稍候...')
+    // 显示加载提示
+    loadingInstance = ElMessage({
+      message: '正在打包文件，请稍候...',
+      type: 'info',
+      duration: 0, // 不自动关闭
+      showClose: false,
+    })
     
     // 调用下载API
     const blob = await tasksApi.downloadTaskFiles(downloadingTask.value.id, downloadFormat.value)
+    
+    // 关闭加载提示
+    if (loadingInstance) {
+      loadingInstance.close()
+      loadingInstance = null
+    }
+    
+    // 检查文件大小
+    const fileSize = blob.size
+    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2)
+    
+    if (fileSize === 0) {
+      ElMessage.warning('下载的文件为空，可能没有可用的文件')
+      return
+    }
+    
+    // 显示文件大小信息
+    ElMessage({
+      message: `文件打包完成，大小: ${fileSizeMB} MB，开始下载...`,
+      type: 'success',
+      duration: 3000,
+    })
     
     // 创建下载链接
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     
-    // 生成文件名
+    // 生成文件名（清理特殊字符）
     const timestamp = dayjs().format('YYYYMMDD_HHmmss')
     const formatSuffix = downloadFormat.value === 'all' ? 'all' : downloadFormat.value
-    link.download = `${downloadingTask.value.task_name}_${formatSuffix}_${timestamp}.zip`
+    const safeTaskName = downloadingTask.value.task_name
+      .replace(/[<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, '_')
+      .substring(0, 50)
+    link.download = `${safeTaskName}_${formatSuffix}_${timestamp}.zip`
     
     // 触发下载
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
     
-    // 释放URL对象
-    window.URL.revokeObjectURL(url)
+    // 延迟释放URL对象，确保下载开始
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+    }, 100)
     
     ElMessage.success('文件下载成功')
   } catch (error) {
+    // 关闭加载提示
+    if (loadingInstance) {
+      loadingInstance.close()
+      loadingInstance = null
+    }
+    
     const apiError = error as ApiError
-    ElMessage.error(apiError.response?.data?.detail || '下载文件失败')
+    const errorMessage = apiError.response?.data?.detail || apiError.message || '下载文件失败'
+    ElMessage.error(errorMessage)
+    console.error('下载文件失败:', error)
   } finally {
+    downloading.value = false
     downloadingTask.value = null
   }
 }

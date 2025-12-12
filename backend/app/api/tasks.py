@@ -377,10 +377,13 @@ def download_task_files(
         # 初始化存储服务
         storage_service = StorageService()
 
-        # 创建临时ZIP文件
+        # 创建临时ZIP文件 - 使用更快的压缩算法
         zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # 使用 ZIP_STORED 存储模式（不压缩）以提升速度
+        # 对于文本文件，压缩效果有限，但速度慢
+        # 如果需要压缩，可以改为 ZIP_DEFLATED，但压缩级别设为最低
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zip_file:
             file_count = 0
 
             # 确定要下载的文件类型
@@ -401,8 +404,11 @@ def download_task_files(
 
             converter = DocumentConverter()
 
-            # 遍历每个政策，获取文件
-            for policy in policies:
+            # 遍历每个政策，获取文件 - 添加进度日志
+            total_policies = len(policies)
+            logger.info(f"开始打包 {total_policies} 个政策的文件")
+
+            for i, policy in enumerate(policies, 1):
                 policy_title = (
                     policy.title.replace("/", "_").replace("\\", "_").replace(":", "_")
                 )
@@ -418,30 +424,12 @@ def download_task_files(
                         policy.id, file_type, task_id=policy.task_id
                     )
 
-                    # 如果文件不存在，先检查S3
-                    if not file_path or not os.path.exists(file_path):
-                        # 检查数据库中是否有S3路径
-                        s3_key = None
-                        if file_type == "markdown" and policy.markdown_s3_key:
-                            s3_key = policy.markdown_s3_key
-                        elif file_type == "docx" and policy.docx_s3_key:
-                            s3_key = policy.docx_s3_key
+                    # 检查文件是否存在于存储位置
+                    file_path = storage_service.get_policy_file_path(
+                        policy.id, file_type, task_id=policy.task_id
+                    )
 
-                        # 如果启用了S3且有S3路径，尝试从S3下载
-                        if s3_key and storage_service.s3_service.is_enabled():
-                            file_path = storage_service.get_policy_file_path(
-                                policy.id, file_type, task_id=policy.task_id
-                            )
-                            if file_path and os.path.exists(file_path):
-                                # 使用从S3下载的文件
-                                pass
-                            else:
-                                logger.warning(
-                                    f"政策 {policy.id} 的 {file_type} 文件在S3中不存在"
-                                )
-                            continue
-
-                    # 如果还是没有文件，才重新生成
+                    # 如果文件不存在，才重新生成
                     if not file_path or not os.path.exists(file_path):
                         # 如果没有S3且文件不存在，才生成
                         logger.warning(
@@ -469,7 +457,9 @@ def download_task_files(
                             # 如果文件已存在且未过期（1天内），直接使用
                             if temp_file_path.exists():
                                 file_stat = temp_file_path.stat()
-                                file_age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+                                file_age = datetime.now(
+                                    timezone.utc
+                                ) - datetime.fromtimestamp(
                                     file_stat.st_mtime, tz=timezone.utc
                                 )
                                 if file_age < timedelta(hours=24):
@@ -546,16 +536,35 @@ def download_task_files(
                         file_ext = "md" if file_type == "markdown" else file_type
                         zip_path = f"{task.task_name}/{file_type}/{policy.id}_{safe_title}.{file_ext}"
 
-                        # 添加到ZIP文件
-                        zip_file.write(file_path, zip_path)
-                        file_count += 1
-                        logger.debug(f"添加文件到ZIP: {zip_path}")
+                        # 添加到ZIP文件 - 优化文件读取
+                        try:
+                            # 使用二进制模式读取文件
+                            with open(file_path, "rb") as f:
+                                file_data = f.read()
+                                zip_file.writestr(zip_path, file_data)
+                            file_count += 1
+                            logger.debug(
+                                f"添加文件到ZIP: {zip_path} ({len(file_data)} bytes)"
+                            )
+                        except Exception as e:
+                            logger.warning(f"读取文件失败 {file_path}: {e}")
+                            continue
+
+                    # 每处理10个政策记录一次进度
+                    if i % 10 == 0 or i == total_policies:
+                        logger.info(
+                            f"已处理 {i}/{total_policies} 个政策，当前文件数: {file_count}"
+                        )
 
         if file_count == 0:
             raise HTTPException(status_code=404, detail="未找到任何可下载的文件")
 
         # 重置缓冲区位置
         zip_buffer.seek(0)
+
+        # 记录压缩统计信息
+        final_size = zip_buffer.tell()
+        logger.info(f"ZIP文件打包完成: {file_count} 个文件, 大小: {final_size} bytes")
 
         # 生成文件名
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

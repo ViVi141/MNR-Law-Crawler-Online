@@ -248,7 +248,9 @@ class MNRSpider:
                             effective_date=policy_data.get("effective_date", ""),
                             crawl_time=policy_data.get(
                                 "crawl_time",
-                                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                                datetime.now(timezone.utc).strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                ),
                             ),
                         )
                     else:
@@ -390,7 +392,9 @@ class MNRSpider:
                     "category": item.get("category", "") or "",
                     "validity": item.get("status", "") or "",
                     "effective_date": item.get("effectivedate", "") or "",
-                    "crawl_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "crawl_time": datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
                 }
                 policies.append(policy)
 

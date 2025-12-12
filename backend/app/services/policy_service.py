@@ -242,7 +242,10 @@ class PolicyService:
                     # 检查是否是新创建的
                     if (
                         policy.crawl_time
-                        and (datetime.now(timezone.utc) - policy.crawl_time).total_seconds() < 5
+                        and (
+                            datetime.now(timezone.utc) - policy.crawl_time
+                        ).total_seconds()
+                        < 5
                     ):
                         result["saved"] += 1
                     else:

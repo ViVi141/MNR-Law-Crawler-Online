@@ -235,7 +235,9 @@ class SchedulerService:
 
             # 记录执行开始
             run_record = ScheduledTaskRun(
-                task_id=scheduled_task_id, run_time=datetime.now(timezone.utc), status="running"
+                task_id=scheduled_task_id,
+                run_time=datetime.now(timezone.utc),
+                status="running",
             )
             db.add(run_record)
             db.commit()

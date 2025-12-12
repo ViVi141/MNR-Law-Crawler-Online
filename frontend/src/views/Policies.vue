@@ -152,7 +152,6 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="markdown">Markdown</el-dropdown-item>
-                  <el-dropdown-item command="json">JSON</el-dropdown-item>
                   <el-dropdown-item command="docx">DOCX</el-dropdown-item>
                 </el-dropdown-menu>
               </template>

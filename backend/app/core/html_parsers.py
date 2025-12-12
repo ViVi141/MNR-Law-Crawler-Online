@@ -192,7 +192,9 @@ class GIMNRParser(BaseHTMLParser):
                         "link": detail_url,
                         "url": detail_url,
                         "content": "",
-                        "crawl_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        "crawl_time": datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
                         "category": category_name,
                         "validity": "",
                         "effective_date": "",
@@ -371,7 +373,9 @@ class FMNRParser(BaseHTMLParser):
                         "link": detail_url,
                         "url": detail_url,
                         "content": "",
-                        "crawl_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        "crawl_time": datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
                         "category": category_name,
                         "validity": validity,
                         "effective_date": "",
