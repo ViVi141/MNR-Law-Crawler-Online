@@ -4,7 +4,7 @@
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -73,7 +73,7 @@ class Policy:
             effective_date=data.get("effective_date", ""),
             publisher=data.get("publisher", ""),
             crawl_time=data.get(
-                "crawl_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "crawl_time", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             ),
         )
 
@@ -157,7 +157,7 @@ class CrawlProgress:
         """已用时间（秒）"""
         if not self.start_time:
             return None
-        end = self.end_time or datetime.now()
+        end = self.end_time or datetime.now(timezone.utc)
         return (end - self.start_time).total_seconds()
 
     def to_dict(self) -> Dict[str, Any]:

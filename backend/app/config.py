@@ -149,7 +149,7 @@ class ConfigManager:
 
         try:
             from .models.system_config import SystemConfig
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             config = (
                 self.db_session.query(SystemConfig)
@@ -158,7 +158,7 @@ class ConfigManager:
             )
             if config:
                 config.value = str(value)
-                config.updated_at = datetime.utcnow()
+                config.updated_at = datetime.now(timezone.utc)
             else:
                 config = SystemConfig(key=key, value=str(value), category=category)
                 self.db_session.add(config)

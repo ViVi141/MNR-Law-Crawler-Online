@@ -2,7 +2,7 @@
 认证服务（JWT）
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError, JWTClaimsError
@@ -54,9 +54,9 @@ class AuthService:
             to_encode["sub"] = str(to_encode["sub"])
 
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
 
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(
@@ -84,10 +84,8 @@ class AuthService:
             # 额外检查：确保过期时间在未来
             exp = payload.get("exp")
             if exp:
-                from datetime import datetime
-
-                expire_time = datetime.utcfromtimestamp(exp)
-                if expire_time < datetime.utcnow():
+                expire_time = datetime.fromtimestamp(exp, tz=timezone.utc)
+                if expire_time < datetime.now(timezone.utc):
                     logger.warning(f"令牌已过期: {expire_time}")
                     return None
 

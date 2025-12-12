@@ -4,7 +4,7 @@
 
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -145,7 +145,8 @@ class SchedulerService:
             raise ValueError(f"定时任务名称已存在: {task_name}")
 
         # 计算下次运行时间
-        next_run_time = trigger.get_next_fire_time(None, datetime.now())
+        # APScheduler 需要 timezone-aware datetime，使用 UTC
+        next_run_time = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
 
         scheduled_task = ScheduledTask(
             task_type=task_type,
@@ -210,7 +211,7 @@ class SchedulerService:
 
         # 更新下次运行时间
         if db:
-            next_run_time = trigger.get_next_fire_time(None, datetime.now())
+            next_run_time = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
             scheduled_task.next_run_time = next_run_time
             db.commit()
 
@@ -234,12 +235,12 @@ class SchedulerService:
 
             # 记录执行开始
             run_record = ScheduledTaskRun(
-                task_id=scheduled_task_id, run_time=datetime.now(), status="running"
+                task_id=scheduled_task_id, run_time=datetime.now(timezone.utc), status="running"
             )
             db.add(run_record)
             db.commit()
 
-            start_time = datetime.now()
+            start_time = datetime.now(timezone.utc)
             logger.info(
                 f"开始执行定时任务: {scheduled_task.task_name} (ID: {scheduled_task_id})"
             )
@@ -254,7 +255,7 @@ class SchedulerService:
                     raise ValueError(f"未知的任务类型: {scheduled_task.task_type}")
 
                 # 更新执行记录
-                end_time = datetime.now()
+                end_time = datetime.now(timezone.utc)
                 duration = int((end_time - start_time).total_seconds())
                 run_record.status = "completed"
                 run_record.result_json = result
@@ -275,7 +276,7 @@ class SchedulerService:
                     day_of_week=parts[4],
                 )
                 scheduled_task.next_run_time = trigger.get_next_fire_time(
-                    None, datetime.now()
+                    None, datetime.now(timezone.utc)
                 )
 
                 db.commit()
@@ -337,7 +338,7 @@ class SchedulerService:
 
             except Exception as e:
                 # 记录错误
-                end_time = datetime.now()
+                end_time = datetime.now(timezone.utc)
                 duration = int((end_time - start_time).total_seconds())
                 error_msg = str(e)
 
@@ -432,7 +433,7 @@ class SchedulerService:
 
                 # 生成备份名称
                 if backup_strategy in ["daily", "weekly", "monthly"]:
-                    date_str = datetime.now().strftime("%Y%m%d")
+                    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
                     backup_name = (
                         f"scheduled_{scheduled_task.id}_{backup_strategy}_{date_str}"
                     )
@@ -442,7 +443,7 @@ class SchedulerService:
                         for c in scheduled_task.task_name
                         if c.isalnum() or c in (" ", "-", "_")
                     ).strip()[:50]
-                    backup_name = f"scheduled_{scheduled_task.id}_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    backup_name = f"scheduled_{scheduled_task.id}_{safe_task_name}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
                 backup_record = backup_service.create_backup(
                     db=db,

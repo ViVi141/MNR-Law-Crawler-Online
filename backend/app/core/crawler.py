@@ -10,7 +10,7 @@ import logging
 import hashlib
 import threading
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
@@ -162,7 +162,7 @@ class PolicyCrawler:
                     category=item.get("category", "") or "",
                     validity=item.get("status", "") or "",
                     effective_date=item.get("effectivedate", "") or "",
-                    crawl_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    crawl_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 )
                 policies.append(policy)
 
@@ -452,7 +452,7 @@ class PolicyCrawler:
                         category=category_name,
                         level=level,
                         validity=validity,
-                        crawl_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        crawl_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     )
                     # 保存数据源信息到policy对象（通过添加自定义属性）
                     policy._data_source = data_source
@@ -1214,9 +1214,9 @@ class PolicyCrawler:
         """批量爬取"""
         if not hasattr(self, "progress") or self.progress is None:
             self.progress = CrawlProgress()
-            self.progress.start_time = datetime.now()
+            self.progress.start_time = datetime.now(timezone.utc)
         elif self.progress.start_time is None:
-            self.progress.start_time = datetime.now()
+            self.progress.start_time = datetime.now(timezone.utc)
         else:
             original_start_time = self.progress.start_time
             self.progress = CrawlProgress()
@@ -1230,7 +1230,7 @@ class PolicyCrawler:
         )
 
         if self.stop_requested:
-            self.progress.end_time = datetime.now()
+            self.progress.end_time = datetime.now(timezone.utc)
             self._update_progress()
             return self.progress
 
@@ -1279,7 +1279,7 @@ class PolicyCrawler:
             self._update_progress()
             time.sleep(self.config.get("request_delay", 2))
 
-        self.progress.end_time = datetime.now()
+        self.progress.end_time = datetime.now(timezone.utc)
         self._update_progress()
 
         if callback:
@@ -1298,7 +1298,7 @@ class PolicyCrawler:
             log_dir_path = Path(log_dir)
             log_dir_path.mkdir(parents=True, exist_ok=True)
             failure_log_file = (
-                log_dir_path / f"failures_{datetime.now().strftime('%Y%m%d')}.log"
+                log_dir_path / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
             )
 
             if callback:
@@ -1328,7 +1328,7 @@ class PolicyCrawler:
             log_dir = self.config.get("log_dir", "logs")
             log_dir_path = Path(log_dir)
             failure_log_file = (
-                log_dir_path / f"failures_{datetime.now().strftime('%Y%m%d')}.log"
+                log_dir_path / f"failures_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
             )
         else:
             failure_log_file = Path(failure_log_file)
@@ -1391,7 +1391,7 @@ class PolicyCrawler:
                             level="自然资源部",
                             validity="",
                             effective_date="",
-                            crawl_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            crawl_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                         )
                         failed_policies.append((policy, reason))
 
@@ -1414,11 +1414,11 @@ class PolicyCrawler:
         # 初始化进度
         if not hasattr(self, "progress") or self.progress is None:
             self.progress = CrawlProgress()
-            self.progress.start_time = datetime.now()
+            self.progress.start_time = datetime.now(timezone.utc)
         else:
             original_start_time = self.progress.start_time
             self.progress = CrawlProgress()
-            self.progress.start_time = original_start_time or datetime.now()
+            self.progress.start_time = original_start_time or datetime.now(timezone.utc)
 
         self.progress.total_count = len(failed_policies)
         self._update_progress()
@@ -1467,7 +1467,7 @@ class PolicyCrawler:
             self._update_progress()
             time.sleep(self.config.get("request_delay", 2))
 
-        self.progress.end_time = datetime.now()
+        self.progress.end_time = datetime.now(timezone.utc)
         self._update_progress()
 
         if callback:

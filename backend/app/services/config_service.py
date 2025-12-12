@@ -647,7 +647,7 @@ class ConfigService:
             import aiosmtplib
             import asyncio
             from email.mime.text import MIMEText
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             # 使用提供的配置或从数据库读取
             if config:
@@ -697,7 +697,7 @@ class ConfigService:
 
             # 创建测试邮件
             msg = MIMEText(
-                f"这是一封测试邮件，发送时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"这是一封测试邮件，发送时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
             )
             msg["Subject"] = "MNR Law Crawler - 测试邮件"
             msg["From"] = test_config["from_address"]

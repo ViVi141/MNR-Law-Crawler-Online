@@ -10,7 +10,7 @@ import logging
 import zipfile
 import io
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..database import get_db
 from ..middleware.auth import get_current_user
@@ -469,8 +469,8 @@ def download_task_files(
                             # 如果文件已存在且未过期（1天内），直接使用
                             if temp_file_path.exists():
                                 file_stat = temp_file_path.stat()
-                                file_age = datetime.now() - datetime.fromtimestamp(
-                                    file_stat.st_mtime
+                                file_age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+                                    file_stat.st_mtime, tz=timezone.utc
                                 )
                                 if file_age < timedelta(hours=24):
                                     file_path = str(temp_file_path)
@@ -558,7 +558,7 @@ def download_task_files(
         zip_buffer.seek(0)
 
         # 生成文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         zip_filename = f"{task.task_name}_{timestamp}.zip"
 
         # 返回ZIP文件流

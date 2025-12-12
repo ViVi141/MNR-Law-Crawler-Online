@@ -5,7 +5,7 @@
 import os
 import logging
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class FileCleanupService:
     def register_temp_file(self, file_path: str):
         """注册临时文件，记录生成时间"""
         if file_path and os.path.exists(file_path):
-            self.temp_file_registry[file_path] = datetime.now()
+            self.temp_file_registry[file_path] = datetime.now(timezone.utc)
             logger.debug(f"注册临时文件: {file_path}")
 
     def cleanup_old_files(self, max_age_hours: int = 24):
@@ -36,7 +36,7 @@ class FileCleanupService:
 
             self.storage_service = StorageService()
 
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
         max_age = timedelta(hours=max_age_hours)
         cleaned_count = 0
         failed_count = 0

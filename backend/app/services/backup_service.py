@@ -62,7 +62,7 @@ class BackupService:
 
         # 生成备份文件名
         if not backup_name:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_name = f"{db_name}_{backup_type}_{timestamp}"
 
         backup_id = str(uuid.uuid4())
@@ -74,7 +74,7 @@ class BackupService:
             id=backup_id,
             backup_type=backup_type,
             status="pending",
-            start_time=datetime.now(),
+            start_time=datetime.now(timezone.utc),
             local_path=str(backup_path),
             source_type=source_type,
             source_id=str(source_id) if source_id else None,
@@ -145,7 +145,7 @@ class BackupService:
 
             # 更新备份记录
             backup_record.status = "completed"
-            backup_record.end_time = datetime.now()
+            backup_record.end_time = datetime.now(timezone.utc)
             backup_record.file_size = file_size_str
             backup_record.local_path = str(backup_path)
 
@@ -198,7 +198,7 @@ class BackupService:
         except Exception as e:
             # 更新备份记录为失败
             backup_record.status = "failed"
-            backup_record.end_time = datetime.now()
+            backup_record.end_time = datetime.now(timezone.utc)
             backup_record.error_message = str(e)
             db.commit()
 

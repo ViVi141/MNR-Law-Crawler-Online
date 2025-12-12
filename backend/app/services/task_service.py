@@ -6,7 +6,7 @@ import logging
 import threading
 import os
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from ..models.task import Task, TaskPolicy
@@ -108,7 +108,7 @@ class TaskService:
 
         # 更新任务状态
         task.status = "running"
-        task.start_time = datetime.now()
+        task.start_time = datetime.now(timezone.utc)
         db.commit()
 
         if background:
@@ -143,7 +143,7 @@ class TaskService:
 
         # 更新任务状态
         task.status = "cancelled"
-        task.end_time = datetime.now()
+        task.end_time = datetime.now(timezone.utc)
         db.commit()
 
         # 停止爬虫（如果正在运行）- 线程安全
@@ -176,7 +176,7 @@ class TaskService:
 
         # 更新任务状态为暂停
         task.status = "paused"
-        task.end_time = datetime.now()
+        task.end_time = datetime.now(timezone.utc)
         db.commit()
 
         # 停止爬虫（如果正在运行）- 线程安全
@@ -391,7 +391,7 @@ class TaskService:
                             message = message[:max_line_length] + "..."
                         # 添加新消息
                         lines.append(
-                            f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
+                            f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}"
                         )
                         # 只保留最后100行
                         if len(lines) > 100:
@@ -590,7 +590,7 @@ class TaskService:
                                 task.status = "paused"
                             else:
                                 task.status = "cancelled"
-                            task.end_time = datetime.now()
+                            task.end_time = datetime.now(timezone.utc)
                             db.commit()
                             break
 
@@ -915,7 +915,7 @@ class TaskService:
                     task.success_count = saved_count
                     task.failed_count = failed_count + skipped_count
 
-                task.end_time = datetime.now()
+                task.end_time = datetime.now(timezone.utc)
                 db.commit()
 
                 # 清理爬虫实例引用
@@ -961,7 +961,7 @@ class TaskService:
                                     for c in task.task_name
                                     if c.isalnum() or c in (" ", "-", "_")
                                 ).strip()[:50]
-                                backup_name = f"task_{task_id}_{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                backup_name = f"task_{task_id}_{safe_task_name}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
                                 backup_record = backup_service.create_backup(
                                     db=db,
                                     backup_type="full",
@@ -1148,7 +1148,7 @@ class TaskService:
                                     success_count=saved_count,
                                     failed_count=failed_count + skipped_count,
                                     start_time=task.start_time,
-                                    end_time=datetime.now(),
+                                    end_time=datetime.now(timezone.utc),
                                     db=db,  # 传入db以实时加载配置
                                 )
                             )
@@ -1190,7 +1190,7 @@ class TaskService:
                         # 如果utils模块不存在，使用简单的错误消息
                         task.error_message = f"任务执行失败: {type(e).__name__}"
 
-                task.end_time = datetime.now()
+                task.end_time = datetime.now(timezone.utc)
                 db.commit()
 
                 # 清理爬虫实例引用 - 线程安全
@@ -1227,7 +1227,7 @@ class TaskService:
                                     ),
                                     error_message=str(e),
                                     start_time=task.start_time,
-                                    end_time=datetime.now(),
+                                    end_time=datetime.now(timezone.utc),
                                     db=db,  # 传入db以实时加载配置
                                 )
                             )

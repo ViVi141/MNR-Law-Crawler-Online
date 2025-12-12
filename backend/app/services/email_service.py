@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..config import settings
 
@@ -228,7 +228,7 @@ class EmailService:
             task_status, ("未知", "gray", "?")
         )
 
-        end_time_str = (end_time or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        end_time_str = (end_time or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         start_time_str = (
             start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
         )
@@ -337,7 +337,7 @@ class EmailService:
         status_color = "green" if status == "completed" else "red"
         status_icon = "✓" if status == "completed" else "✗"
 
-        backup_time = (end_time or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        backup_time = (end_time or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         start_time_str = (
             start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "N/A"
         )
@@ -424,7 +424,7 @@ class EmailService:
 
 级别: {level_text}
 标题: {title}
-时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}
 
 {message}
 """
@@ -439,7 +439,7 @@ class EmailService:
     <h2 style="color: {color}">系统通知</h2>
     <p><strong>级别:</strong> {level_text}</p>
     <p><strong>标题:</strong> {title}</p>
-    <p><strong>时间:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <p><strong>时间:</strong> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}</p>
     <hr>
     <pre>{message}</pre>
 </body>

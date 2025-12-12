@@ -5,7 +5,7 @@
 import json
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -40,7 +40,7 @@ class PolicyService:
             # 解析日期
             pub_date = self._parse_date(policy_data.get("pub_date"))
             effective_date = self._parse_date(policy_data.get("effective_date"))
-            crawl_time = datetime.now()
+            crawl_time = datetime.now(timezone.utc)
 
             # 检查政策是否已存在（基于任务ID，确保每个任务的数据独立）
             if task_id:
@@ -242,7 +242,7 @@ class PolicyService:
                     # 检查是否是新创建的
                     if (
                         policy.crawl_time
-                        and (datetime.now() - policy.crawl_time).total_seconds() < 5
+                        and (datetime.now(timezone.utc) - policy.crawl_time).total_seconds() < 5
                     ):
                         result["saved"] += 1
                     else:

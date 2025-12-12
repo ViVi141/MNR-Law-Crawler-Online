@@ -4,7 +4,7 @@ HTML解析器模块
 """
 
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Callable
 from urllib.parse import urljoin
 import logging
@@ -192,7 +192,7 @@ class GIMNRParser(BaseHTMLParser):
                         "link": detail_url,
                         "url": detail_url,
                         "content": "",
-                        "crawl_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "crawl_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                         "category": category_name,
                         "validity": "",
                         "effective_date": "",
@@ -371,7 +371,7 @@ class FMNRParser(BaseHTMLParser):
                         "link": detail_url,
                         "url": detail_url,
                         "content": "",
-                        "crawl_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "crawl_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                         "category": category_name,
                         "validity": validity,
                         "effective_date": "",
