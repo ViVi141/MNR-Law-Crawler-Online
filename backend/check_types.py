@@ -100,7 +100,9 @@ class TypeChecker(ast.NodeVisitor):
         if isinstance(value, ast.BinOp):
             self._check_binop_assignment(target, value, node)
 
-    def _check_attribute_assignment(self, target: ast.Attribute, value: ast.AST, node: ast.Assign):
+    def _check_attribute_assignment(
+        self, target: ast.Attribute, value: ast.AST, node: ast.Assign
+    ):
         """检查属性赋值"""
         # 属性赋值通常是合法的（obj.attr = value），这里不检查
         # 只检查明显的问题，比如对字面量的属性赋值
@@ -113,7 +115,9 @@ class TypeChecker(ast.NodeVisitor):
                     f"尝试对常量 {type(target.value.value).__name__} 进行属性赋值（无效操作）",
                 )
 
-    def _check_unpacking_assignment(self, target: ast.AST, value: ast.AST, node: ast.Assign):
+    def _check_unpacking_assignment(
+        self, target: ast.AST, value: ast.AST, node: ast.Assign
+    ):
         """检查解包赋值"""
         if isinstance(target, (ast.Tuple, ast.List)):
             target_count = len(target.elts) if hasattr(target, "elts") else 0
@@ -126,7 +130,9 @@ class TypeChecker(ast.NodeVisitor):
                         f"解包数量不匹配: {target_count} 个目标, {value_count} 个值",
                     )
 
-    def _check_call_assignment(self, target: ast.Name, call: ast.Call, node: ast.Assign):
+    def _check_call_assignment(
+        self, target: ast.Name, call: ast.Call, node: ast.Assign
+    ):
         """检查函数调用赋值"""
         # 检查常见的类型不匹配
         if isinstance(call.func, ast.Name):
@@ -136,7 +142,9 @@ class TypeChecker(ast.NodeVisitor):
                 # 这些函数可能返回 None，但赋值可能期望非 None 值
                 pass
 
-    def _check_binop_assignment(self, target: ast.Name, binop: ast.BinOp, node: ast.Assign):
+    def _check_binop_assignment(
+        self, target: ast.Name, binop: ast.BinOp, node: ast.Assign
+    ):
         """检查二元运算赋值"""
         # 检查字符串和数字的混合运算
         if isinstance(binop.op, (ast.Add, ast.Mult)):
@@ -152,7 +160,9 @@ class TypeChecker(ast.NodeVisitor):
                         f"可能的类型不匹配: {left_type} 和 {right_type} 的运算",
                     )
 
-    def _check_type_annotation(self, target: ast.AST, annotation: ast.AST, value: ast.AST, node: ast.AnnAssign):
+    def _check_type_annotation(
+        self, target: ast.AST, annotation: ast.AST, value: ast.AST, node: ast.AnnAssign
+    ):
         """检查类型注解与实际值的匹配"""
         # 这里可以添加更复杂的类型检查逻辑
         pass
@@ -258,7 +268,14 @@ def check_file(filepath: Path) -> List[Dict[str, Any]]:
 def find_python_files(directory: Path, exclude_dirs: List[str] = None) -> List[Path]:
     """查找所有 Python 文件"""
     if exclude_dirs is None:
-        exclude_dirs = ["__pycache__", ".git", "node_modules", "venv", ".venv", "migrations"]
+        exclude_dirs = [
+            "__pycache__",
+            ".git",
+            "node_modules",
+            "venv",
+            ".venv",
+            "migrations",
+        ]
 
     python_files = []
     for root, dirs, files in os.walk(directory):
@@ -361,4 +378,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

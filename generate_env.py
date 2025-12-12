@@ -7,38 +7,45 @@ import secrets
 import string
 from pathlib import Path
 
+
 def generate_random_string(length: int) -> str:
     """生成强随机字符串"""
     alphabet = string.ascii_letters + string.digits + string.punctuation
     # 移除可能造成问题的特殊字符
-    alphabet = alphabet.replace('"', '').replace("'", '').replace('$', '').replace('\\', '').replace('`', '')
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
+    alphabet = (
+        alphabet.replace('"', "")
+        .replace("'", "")
+        .replace("$", "")
+        .replace("\\", "")
+        .replace("`", "")
+    )
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
 
 def generate_env_file():
     """生成 .env 文件"""
-    env_file = Path(__file__).parent / '.env'
-    
+    env_file = Path(__file__).parent / ".env"
+
     # 生成随机密钥
     jwt_secret_key = generate_random_string(128)  # JWT密钥需要足够长
     postgres_password = generate_random_string(32)  # 数据库密码
-    
+
     # 读取模板
-    example_file = Path(__file__).parent / 'env.example'
+    example_file = Path(__file__).parent / "env.example"
     if example_file.exists():
-        content = example_file.read_text(encoding='utf-8')
+        content = example_file.read_text(encoding="utf-8")
         # 替换密钥
         content = content.replace(
-            'POSTGRES_PASSWORD=mnr_password',
-            f'POSTGRES_PASSWORD={postgres_password}'
+            "POSTGRES_PASSWORD=mnr_password", f"POSTGRES_PASSWORD={postgres_password}"
         )
         content = content.replace(
-            'JWT_SECRET_KEY=change-me-in-production-please-use-a-random-string',
-            f'JWT_SECRET_KEY={jwt_secret_key}'
+            "JWT_SECRET_KEY=change-me-in-production-please-use-a-random-string",
+            f"JWT_SECRET_KEY={jwt_secret_key}",
         )
         # 更新注释
         content = content.replace(
-            '# 复制此文件为 .env 并根据实际情况修改配置',
-            '# 自动生成的环境变量配置（包含强随机密钥）'
+            "# 复制此文件为 .env 并根据实际情况修改配置",
+            "# 自动生成的环境变量配置（包含强随机密钥）",
         )
     else:
         # 如果模板不存在，创建基本配置
@@ -124,13 +131,14 @@ CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
 # ============================================
 LOG_FILE=./logs/app.log
 """
-    
+
     # 写入文件
-    env_file.write_text(content, encoding='utf-8')
+    env_file.write_text(content, encoding="utf-8")
     print(f"✅ .env 文件已生成: {env_file}")
     print(f"✅ JWT_SECRET_KEY: {jwt_secret_key[:20]}... (已生成128字符)")
     print(f"✅ POSTGRES_PASSWORD: {postgres_password[:10]}... (已生成32字符)")
     print("\n⚠️  请妥善保管 .env 文件，不要将其提交到 Git 仓库！")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     generate_env_file()
