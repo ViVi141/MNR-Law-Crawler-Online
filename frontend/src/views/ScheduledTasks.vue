@@ -71,81 +71,16 @@
     </el-card>
 
     <!-- 创建/编辑对话框 -->
-    <el-dialog
+    <TaskCreationForm
       v-model="showCreateDialog"
-      :title="editingTask ? '编辑定时任务' : '新建定时任务'"
-      width="700px"
-    >
-      <el-form :model="taskForm" :rules="taskRules" ref="taskFormRef" label-width="120px">
-        <el-form-item label="任务类型" prop="task_type">
-          <el-select v-model="taskForm.task_type" placeholder="请选择任务类型">
-            <el-option label="爬取任务" value="crawl_task" />
-            <el-option label="备份任务" value="backup_task" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="任务名称" prop="task_name">
-          <el-input v-model="taskForm.task_name" placeholder="请输入任务名称" />
-        </el-form-item>
-        <el-form-item label="Cron表达式" prop="cron_expression">
-          <el-input v-model="taskForm.cron_expression" placeholder="例如: 0 2 * * * (每天凌晨2点)">
-            <template #append>
-              <el-button @click="showCronHelp = true">帮助</el-button>
-            </template>
-          </el-input>
-          <div class="cron-help-text">
-            <p v-if="taskForm.cron_expression" class="cron-preview">
-              预览: {{ parseCronExpression(taskForm.cron_expression) }}
-            </p>
-          </div>
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'crawl_task'" label="关键词">
-          <el-input
-            v-model="taskForm.keywords"
-            type="textarea"
-            :rows="3"
-            placeholder="多个关键词用逗号分隔，留空表示爬取全部"
-          />
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'backup_task'" label="备份类型">
-          <el-select v-model="taskForm.backup_type" placeholder="请选择备份类型">
-            <el-option label="完整备份" value="full" />
-            <el-option label="增量备份" value="incremental" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="是否启用">
-          <el-switch v-model="taskForm.is_enabled" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="handleCancelDialog">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+      :mode="editingTask ? 'edit' : 'create'"
+      task-type="scheduled_task"
+      :disable-task-type-select="false"
+      :edit-data="editingTask"
+      @submit="handleScheduledTaskSubmit"
+      @cancel="handleCancelDialog"
+    />
 
-    <!-- Cron表达式帮助对话框 -->
-    <el-dialog v-model="showCronHelp" title="Cron表达式帮助" width="600px">
-      <div class="cron-help">
-        <p><strong>格式:</strong> 分钟 小时 日 月 星期</p>
-        <h4>示例:</h4>
-        <ul>
-          <li><code>0 2 * * *</code> - 每天凌晨2点</li>
-          <li><code>0 9 * * *</code> - 每天上午9点</li>
-          <li><code>0 2 * * 1</code> - 每周一凌晨2点</li>
-          <li><code>0 2 1 * *</code> - 每月1号凌晨2点</li>
-          <li><code>0 */6 * * *</code> - 每6小时</li>
-          <li><code>*/30 * * * *</code> - 每30分钟</li>
-          <li><code>0 9 * * 1-5</code> - 工作日上午9点</li>
-        </ul>
-        <h4>字段说明:</h4>
-        <ul>
-          <li><strong>分钟:</strong> 0-59</li>
-          <li><strong>小时:</strong> 0-23</li>
-          <li><strong>日:</strong> 1-31</li>
-          <li><strong>月:</strong> 1-12</li>
-          <li><strong>星期:</strong> 0-7 (0和7都表示周日)</li>
-        </ul>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -153,58 +88,27 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { scheduledTasksApi } from '../api/scheduledTasks'
 import type {
   ScheduledTask,
   ScheduledTaskCreateRequest,
   ScheduledTaskListItem,
 } from '../types/scheduledTask'
-import type { ApiError, CrawlTaskConfig, BackupTaskConfig } from '../types/common'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { ApiError } from '../types/common'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
 const saving = ref(false)
 const scheduledTasks = ref<ScheduledTask[]>([])
 const showCreateDialog = ref(false)
-const showCronHelp = ref(false)
 const editingTask = ref<ScheduledTask | null>(null)
-const taskFormRef = ref<FormInstance>()
 
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0,
 })
-
-const taskForm = reactive<{
-  task_type: string
-  task_name: string
-  cron_expression: string
-  keywords: string
-  backup_type: string
-  is_enabled: boolean
-}>({
-  task_type: 'crawl_task',
-  task_name: '',
-  cron_expression: '0 2 * * *',
-  keywords: '',
-  backup_type: 'full',
-  is_enabled: true,
-})
-
-const taskRules: FormRules = {
-  task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
-  task_name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  cron_expression: [
-    { required: true, message: '请输入Cron表达式', trigger: 'blur' },
-    {
-      pattern: /^(\*|([0-9]|[1-5][0-9])|\*\/([0-9]|[1-5][0-9])) (\*|([0-9]|1[0-9]|2[0-3])|\*\/([0-9]|1[0-9]|2[0-3])) (\*|([1-9]|[12][0-9]|3[01])|\*\/([1-9]|[12][0-9]|3[01])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-7])|\*\/([0-7]))$/,
-      message: 'Cron表达式格式不正确',
-      trigger: 'blur',
-    },
-  ],
-}
 
 const formatDateTime = (date: string) => {
   return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
@@ -228,28 +132,6 @@ const getStatusText = (status: string) => {
   return statusMap[status] || status
 }
 
-const parseCronExpression = (cron: string) => {
-  // 简单的Cron表达式解析（示例）
-  try {
-    const parts = cron.split(' ')
-    if (parts.length !== 5) return '格式错误'
-
-    const [minute, hour] = parts
-    const weekday = parts[4]
-
-    if (minute === '0' && hour !== '*') {
-      return `每天${hour}点执行`
-    }
-    if (weekday !== '*') {
-      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-      return `每${weekdays[parseInt(weekday) % 7]}执行`
-    }
-
-    return '已配置'
-  } catch {
-    return '解析失败'
-  }
-}
 
 const fetchTasks = async () => {
   loading.value = true
@@ -261,7 +143,7 @@ const fetchTasks = async () => {
     // 将ScheduledTaskListItem转换为ScheduledTask格式
     scheduledTasks.value = response.items.map((task: ScheduledTaskListItem) => ({
       ...task,
-      config_json: (task as ScheduledTask).config_json || ({} as CrawlTaskConfig),
+      config_json: (task as ScheduledTask).config_json || {},
       _toggling: false,
     }))
     pagination.total = response.total || 0
@@ -299,15 +181,6 @@ const handleToggle = async (task: ScheduledTask & { _toggling: boolean }) => {
 
 const handleEdit = (task: ScheduledTask) => {
   editingTask.value = task
-  const config = task.config_json as CrawlTaskConfig | BackupTaskConfig | undefined
-  Object.assign(taskForm, {
-    task_type: task.task_type,
-    task_name: task.task_name,
-    cron_expression: task.cron_expression,
-    keywords: (config as CrawlTaskConfig)?.keywords?.join(',') || '',
-    backup_type: (config as BackupTaskConfig)?.backup_type || 'full',
-    is_enabled: task.is_enabled,
-  })
   showCreateDialog.value = true
 }
 
@@ -334,59 +207,43 @@ const handleDelete = async (task: ScheduledTask) => {
 const handleCancelDialog = () => {
   showCreateDialog.value = false
   editingTask.value = null
-  Object.assign(taskForm, {
-    task_type: 'crawl_task',
-    task_name: '',
-    cron_expression: '0 2 * * *',
-    keywords: '',
-    backup_type: 'full',
-    is_enabled: true,
-  })
 }
 
-const handleSave = async () => {
-  if (!taskFormRef.value) return
-
-  await taskFormRef.value.validate(async (valid: boolean) => {
-    if (valid) {
-      saving.value = true
-      try {
-        let config: CrawlTaskConfig | BackupTaskConfig
-        if (taskForm.task_type === 'crawl_task') {
-          config = {} as CrawlTaskConfig
-          if (taskForm.keywords.trim()) {
-            config.keywords = taskForm.keywords.split(',').map((k) => k.trim()).filter(Boolean)
-          }
-        } else {
-          config = { backup_type: taskForm.backup_type } as BackupTaskConfig
-        }
-
-        const request: ScheduledTaskCreateRequest = {
-          task_type: taskForm.task_type,
-          task_name: taskForm.task_name,
-          cron_expression: taskForm.cron_expression,
-          config,  // 后端要求config字段必需，即使是空对象也要提供
-          is_enabled: taskForm.is_enabled,
-        }
-
-        if (editingTask.value) {
-          await scheduledTasksApi.updateScheduledTask(editingTask.value.id, request)
-          ElMessage.success('任务已更新')
-        } else {
-          await scheduledTasksApi.createScheduledTask(request)
-          ElMessage.success('任务已创建')
-        }
-
-        handleCancelDialog()
-        await fetchTasks()
-      } catch (error) {
-        const apiError = error as ApiError
-        ElMessage.error(apiError.response?.data?.detail || '保存失败')
-      } finally {
-        saving.value = false
+const handleScheduledTaskSubmit = async (formData: any) => {
+  saving.value = true
+  try {
+    if (editingTask.value) {
+      // 更新定时任务 - 使用相同的创建接口进行更新
+      const updateRequest: ScheduledTaskCreateRequest = {
+        task_type: formData.scheduled_task_type,
+        task_name: formData.task_name,
+        cron_expression: formData.cron_expression,
+        config: formData.config,
+        is_enabled: formData.is_enabled,
       }
+      await scheduledTasksApi.updateScheduledTask(editingTask.value.id, updateRequest)
+      ElMessage.success('任务已更新')
+    } else {
+      // 创建定时任务
+      const createRequest: ScheduledTaskCreateRequest = {
+        task_type: formData.scheduled_task_type,
+        task_name: formData.task_name,
+        cron_expression: formData.cron_expression,
+        config: formData.config,
+        is_enabled: formData.is_enabled,
+      }
+      await scheduledTasksApi.createScheduledTask(createRequest)
+      ElMessage.success('任务已创建')
     }
-  })
+
+    handleCancelDialog()
+    await fetchTasks()
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 onMounted(() => {
@@ -407,34 +264,6 @@ onMounted(() => {
     }
   }
 
-  .cron-help-text {
-    margin-top: 5px;
-    font-size: 12px;
-    color: #909399;
-
-    .cron-preview {
-      margin: 0;
-      color: #409eff;
-    }
-  }
-
-  .cron-help {
-    ul {
-      margin: 10px 0;
-      padding-left: 20px;
-
-      li {
-        margin: 5px 0;
-
-        code {
-          background-color: #f5f7fa;
-          padding: 2px 6px;
-          border-radius: 3px;
-          font-family: monospace;
-        }
-      }
-    }
-  }
 }
 
 .scheduled-tasks-page {

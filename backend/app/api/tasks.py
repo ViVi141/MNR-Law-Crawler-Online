@@ -419,19 +419,26 @@ def download_task_files(
                 )[:100]
 
                 for file_type in file_types:
-                    # 获取文件路径（使用policy的task_id，确保文件路径正确）
-                    file_path = storage_service.get_policy_file_path(
-                        policy.id, file_type, task_id=policy.task_id
+                    # 直接构建本地存储路径（不通过get_policy_file_path，因为它优先返回缓存路径）
+                    file_ext = "md" if file_type == "markdown" else file_type
+                    if policy.task_id:
+                        file_dir = f"{policy.task_id}/{policy.id}"
+                    else:
+                        file_dir = str(policy.id)
+
+                    file_path = os.path.join(
+                        str(storage_service.local_dir),
+                        "policies",
+                        file_dir,
+                        f"{policy.id}.{file_ext}",
                     )
 
-                    # 检查文件是否存在于存储位置
-                    file_path = storage_service.get_policy_file_path(
-                        policy.id, file_type, task_id=policy.task_id
-                    )
-
-                    # 如果文件不存在，才重新生成
-                    if not file_path or not os.path.exists(file_path):
-                        # 如果没有S3且文件不存在，才生成
+                    # 检查本地存储文件是否存在
+                    if os.path.exists(file_path):
+                        # 文件存在，直接使用
+                        logger.debug(f"使用现有文件: {file_path}")
+                    else:
+                        # 文件不存在，尝试重新生成
                         logger.warning(
                             f"政策 {policy.id} 的 {file_type} 文件不存在，尝试重新生成..."
                         )
@@ -451,10 +458,14 @@ def download_task_files(
                             )
                             temp_base_dir.mkdir(parents=True, exist_ok=True)
                             # 将文件类型转换为实际扩展名
-                            file_ext = "md" if file_type == "markdown" else file_type
-                            temp_file_path = temp_base_dir / f"{policy.id}.{file_ext}"
+                            temp_file_ext = (
+                                "md" if file_type == "markdown" else file_type
+                            )
+                            temp_file_path = (
+                                temp_base_dir / f"{policy.id}.{temp_file_ext}"
+                            )
 
-                            # 如果文件已存在且未过期（1天内），直接使用
+                            # 如果临时文件已存在且未过期（1天内），直接使用
                             if temp_file_path.exists():
                                 file_stat = temp_file_path.stat()
                                 file_age = datetime.now(
@@ -465,64 +476,60 @@ def download_task_files(
                                 if file_age < timedelta(hours=24):
                                     file_path = str(temp_file_path)
                                     logger.debug(f"使用已存在的临时文件: {file_path}")
-                                    continue
-
-                            # 根据文件类型生成文件
-                            if file_type == "markdown":
-                                # 生成Markdown文件
-                                md_content = _generate_markdown_from_policy(policy)
-                                with open(temp_file_path, "w", encoding="utf-8") as f:
-                                    f.write(md_content)
-                            elif file_type == "docx":
-                                # 生成DOCX文件
-                                _generate_docx_from_policy(
-                                    policy, str(temp_file_path), converter
-                                )
-
-                            # 如果生成成功，注册临时文件并保存到storage_service
-                            if (
-                                temp_file_path.exists()
-                                and temp_file_path.stat().st_size > 0
-                            ):
-                                file_path = str(temp_file_path)
-                                # 注册临时文件，用于后续清理
-                                cleanup_service.register_temp_file(file_path)
-
-                                # 尝试保存到storage_service（使用policy的task_id，确保文件路径正确）
-                                try:
-                                    storage_result = storage_service.save_policy_file(
-                                        policy.id,
-                                        file_type,
-                                        file_path,
-                                        task_id=policy.task_id,
-                                    )
-                                    if storage_result.get("success"):
-                                        # 如果保存成功，更新数据库中的路径
-                                        policy.markdown_local_path = (
-                                            storage_result.get("local_path")
-                                            if file_type == "markdown"
-                                            else policy.markdown_local_path
-                                        )
-                                        policy.docx_local_path = (
-                                            storage_result.get("local_path")
-                                            if file_type == "docx"
-                                            else policy.docx_local_path
-                                        )
-                                        db.commit()
-                                        logger.debug(
-                                            f"文件已保存到存储服务: {storage_result.get('local_path')}"
-                                        )
-                                except Exception as e:
-                                    logger.warning(f"保存文件到存储服务失败: {e}")
-
-                                logger.info(
-                                    f"成功重新生成政策 {policy.id} 的 {file_type} 文件"
-                                )
+                                else:
+                                    # 删除过期文件
+                                    temp_file_path.unlink()
                             else:
-                                logger.warning(
-                                    f"重新生成政策 {policy.id} 的 {file_type} 文件失败"
-                                )
-                                continue
+                                # 根据文件类型生成文件
+                                if file_type == "markdown":
+                                    # 生成Markdown文件
+                                    md_content = _generate_markdown_from_policy(policy)
+                                    with open(
+                                        temp_file_path, "w", encoding="utf-8"
+                                    ) as f:
+                                        f.write(md_content)
+                                elif file_type == "docx":
+                                    # 生成DOCX文件
+                                    _generate_docx_from_policy(
+                                        policy, str(temp_file_path), converter
+                                    )
+
+                                # 如果生成成功，注册临时文件并保存到storage_service
+                                if (
+                                    temp_file_path.exists()
+                                    and temp_file_path.stat().st_size > 0
+                                ):
+                                    file_path = str(temp_file_path)
+                                    # 注册临时文件，用于后续清理
+                                    cleanup_service.register_temp_file(file_path)
+
+                                    # 尝试保存到storage_service（使用policy的task_id，确保文件路径正确）
+                                    try:
+                                        storage_result = (
+                                            storage_service.save_policy_file(
+                                                policy.id,
+                                                file_type,
+                                                file_path,
+                                                task_id=policy.task_id,
+                                            )
+                                        )
+                                        if storage_result.get("success"):
+                                            # 如果保存成功，使用正式存储路径
+                                            file_path = storage_result.get("local_path")
+                                            logger.debug(
+                                                f"文件已保存到存储服务: {file_path}"
+                                            )
+                                    except Exception as e:
+                                        logger.warning(f"保存文件到存储服务失败: {e}")
+
+                                    logger.info(
+                                        f"成功重新生成政策 {policy.id} 的 {file_type} 文件"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"重新生成政策 {policy.id} 的 {file_type} 文件失败"
+                                    )
+                                    continue
                         except Exception as e:
                             logger.error(
                                 f"重新生成政策 {policy.id} 的 {file_type} 文件时出错: {e}"

@@ -147,97 +147,13 @@
     </el-dialog>
 
     <!-- 创建任务对话框 -->
-    <el-dialog 
-      v-model="showCreateDialog" 
-      title="创建任务" 
-      width="600px"
-      @opened="handleDialogOpened"
-    >
-      <el-form :model="taskForm" :rules="taskRules" ref="taskFormRef" label-width="100px">
-        <el-form-item label="任务类型" prop="task_type">
-          <el-select v-model="taskForm.task_type" placeholder="请选择任务类型" @change="handleTaskTypeChange">
-            <el-option label="爬取任务" value="crawl_task" />
-            <el-option label="备份任务" value="backup_task" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="任务名称" prop="task_name">
-          <el-input v-model="taskForm.task_name" placeholder="请输入任务名称" />
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'crawl_task'" label="关键词">
-          <el-input
-            v-model="taskForm.keywords"
-            type="textarea"
-            :rows="3"
-            placeholder="多个关键词用逗号分隔，留空表示爬取全部"
-          />
-          <div class="help-text">
-            留空表示全量爬取（不限制关键词）。如果同时留空关键词和日期范围，将爬取所有政策。
-          </div>
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'crawl_task'" label="日期范围">
-          <el-date-picker
-            v-model="taskForm.dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            value-format="YYYY-MM-DD"
-            clearable
-          />
-          <div class="help-text">
-            留空表示不限制时间范围。如果同时留空关键词和日期范围，将进行全量爬取。
-          </div>
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'crawl_task'" label="最大页数">
-          <el-input-number
-            v-model="taskForm.limitPages"
-            :min="1"
-            :max="1000"
-            placeholder="留空表示不限制"
-          />
-          <span class="help-text">限制爬取的页面数量，留空表示不限制</span>
-        </el-form-item>
-        <el-form-item 
-          v-if="taskForm.task_type === 'crawl_task'" 
-          label="数据源" 
-          prop="selectedDataSources"
-          required
-        >
-          <el-checkbox-group v-model="taskForm.selectedDataSources">
-            <el-checkbox
-              v-for="source in availableDataSources"
-              :key="source.name"
-              :label="source.name"
-              :disabled="false"
-            >
-              {{ source.name }}
-              <el-tag v-if="source.enabled" type="success" size="small" style="margin-left: 8px;">已启用</el-tag>
-            </el-checkbox>
-          </el-checkbox-group>
-          <div class="help-text" style="margin-top: 8px; color: #909399; font-size: 12px;">
-            <div>• 必须至少选择一个数据源</div>
-            <div>• 可以选择一个或两个数据源。如果选择两个，将按顺序执行：先完成第一个数据源的所有分类，再执行第二个数据源。</div>
-            <div v-if="availableDataSources.length === 0" style="color: #f56c6c; margin-top: 5px;">
-              ⚠️ 当前没有可用的数据源，请先在系统设置中配置数据源
-            </div>
-          </div>
-        </el-form-item>
-        <el-form-item v-if="taskForm.task_type === 'backup_task'" label="备份类型">
-          <el-select v-model="taskForm.backup_type" placeholder="请选择备份类型">
-            <el-option label="完整备份" value="full" />
-            <el-option label="增量备份" value="incremental" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="自动启动">
-          <el-switch v-model="taskForm.autoStart" />
-          <span class="help-text">创建后立即开始执行任务</span>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreate">创建</el-button>
-      </template>
-    </el-dialog>
+    <TaskCreationForm
+      v-model="showCreateDialog"
+      :task-type="undefined"
+      :disable-task-type-select="false"
+      @submit="handleTaskSubmit"
+      @cancel="showCreateDialog = false"
+    />
 
     <!-- 任务详情对话框 -->
     <el-dialog v-model="showDetailDialog" title="任务详情" width="900px" @close="stopTaskDetailRefresh">
@@ -368,11 +284,10 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Download } from '@element-plus/icons-vue'
+import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { tasksApi, type TaskListParams } from '../api/tasks'
-import { configApi } from '../api/config'
 import type { Task, TaskCreateRequest } from '../types/task'
-import type { ApiError, CrawlTaskConfig, BackupTaskConfig, DataSourceConfig } from '../types/common'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { ApiError } from '../types/common'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
@@ -381,7 +296,6 @@ const tasks = ref<Task[]>([])
 const showCreateDialog = ref(false)
 const showDetailDialog = ref(false)
 const currentTask = ref<Task | null>(null)
-const taskFormRef = ref<FormInstance>()
 const activeTab = ref('info')
 const progressLogContentRef = ref<HTMLElement | null>(null)
 let taskDetailRefreshInterval: ReturnType<typeof setInterval> | null = null
@@ -390,47 +304,6 @@ const filterForm = reactive({
   task_type: '',
   status: '',
 })
-
-const availableDataSources = ref<DataSourceConfig[]>([])
-const taskForm = reactive<{
-  task_type: string
-  task_name: string
-  keywords: string
-  backup_type: string
-  dateRange: [string, string] | null
-  limitPages: number | null
-  autoStart: boolean
-  selectedDataSources: string[]
-}>({
-  task_type: 'crawl_task',
-  task_name: '',
-  keywords: '',
-  backup_type: 'full',
-  dateRange: null,
-  limitPages: null,
-  autoStart: true,
-  selectedDataSources: [],
-})
-
-const taskRules: FormRules = {
-  task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
-  task_name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  selectedDataSources: [
-    {
-      validator: (_rule: unknown, value: string[], callback: (error?: Error) => void) => {
-        // 对于爬取任务，必须至少选择一个数据源
-        if (taskForm.task_type === 'crawl_task') {
-          if (!value || value.length === 0) {
-            callback(new Error('请至少选择一个数据源'))
-            return
-          }
-        }
-        callback()
-      },
-      trigger: 'change',
-    },
-  ],
-}
 
 const pagination = reactive({
   page: 1,
@@ -508,79 +381,25 @@ const handlePageChange = () => {
   fetchTasks()
 }
 
-const handleCreate = async () => {
-  if (!taskFormRef.value) return
-
-  await taskFormRef.value.validate(async (valid: boolean) => {
-    if (valid) {
-      // 验证数据源选择
-      if (taskForm.task_type === 'crawl_task' && taskForm.selectedDataSources.length === 0) {
-        ElMessage.warning('请至少选择一个数据源')
-        return
-      }
-
-      creating.value = true
-      try {
-        let config: CrawlTaskConfig | BackupTaskConfig
-        if (taskForm.task_type === 'crawl_task') {
-          config = {} as CrawlTaskConfig
-          if (taskForm.keywords.trim()) {
-            config.keywords = taskForm.keywords.split(',').map((k) => k.trim()).filter(Boolean)
-          }
-          if (taskForm.dateRange && taskForm.dateRange.length === 2) {
-            config.date_range = {
-              start: taskForm.dateRange[0],
-              end: taskForm.dateRange[1],
-            }
-          }
-          if (taskForm.limitPages) {
-            config.limit_pages = taskForm.limitPages
-          }
-          // 添加数据源配置
-          if (taskForm.selectedDataSources.length > 0) {
-            config.data_sources = availableDataSources.value
-              .filter((source: DataSourceConfig) => taskForm.selectedDataSources.includes(source.name))
-              .map((source: DataSourceConfig) => ({
-                ...source,
-                enabled: true
-              }))
-          }
-        } else {
-          config = { backup_type: taskForm.backup_type } as BackupTaskConfig
-        }
-
-        const request: TaskCreateRequest = {
-          task_type: taskForm.task_type,
-          task_name: taskForm.task_name,
-          config,
-        }
-
-        await tasksApi.createTask(request, taskForm.autoStart)
-        ElMessage.success('任务创建成功')
-        showCreateDialog.value = false
-        // 重置表单，但保留数据源选择和任务类型
-        const defaultSelectedDataSources = availableDataSources.value.length > 0 
-          ? [availableDataSources.value.find(ds => ds.enabled)?.name || availableDataSources.value[0].name].filter(Boolean)
-          : []
-        Object.assign(taskForm, {
-          task_type: 'crawl_task',
-          task_name: '',
-          keywords: '',
-          backup_type: 'full',
-          dateRange: null,
-          limitPages: null,
-          autoStart: true,
-          selectedDataSources: defaultSelectedDataSources,
-        })
-        fetchTasks()
-      } catch (error) {
-        const apiError = error as ApiError
-        ElMessage.error(apiError.response?.data?.detail || '创建任务失败')
-      } finally {
-        creating.value = false
-      }
+const handleTaskSubmit = async (formData: any) => {
+  creating.value = true
+  try {
+    const request: TaskCreateRequest = {
+      task_type: formData.task_type,
+      task_name: formData.task_name,
+      config: formData.config,
     }
-  })
+
+    await tasksApi.createTask(request, formData.autoStart)
+    ElMessage.success('任务创建成功')
+    showCreateDialog.value = false
+    fetchTasks()
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '创建任务失败')
+  } finally {
+    creating.value = false
+  }
 }
 
 const handleViewDetail = async (task: Task) => {
@@ -864,79 +683,7 @@ const handleDelete = async (task: Task) => {
 
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
-const loadDataSources = async () => {
-  try {
-    const response = await configApi.getDataSources()
-    availableDataSources.value = response.data_sources
-    // 默认选择第一个启用的数据源，如果没有启用的则选择第一个
-    const enabledSource = response.data_sources.find(ds => ds.enabled)
-    if (enabledSource) {
-      taskForm.selectedDataSources = [enabledSource.name]
-    } else if (response.data_sources.length > 0) {
-      taskForm.selectedDataSources = [response.data_sources[0].name]
-    }
-  } catch (error) {
-    const apiError = error as ApiError
-    ElMessage.warning(apiError.response?.data?.detail || '获取数据源列表失败，将使用默认配置')
-    // 使用默认数据源
-    availableDataSources.value = [
-      {
-        name: '政府信息公开平台',
-        base_url: 'https://gi.mnr.gov.cn/',
-        search_api: 'https://search.mnr.gov.cn/was5/web/search',
-        ajax_api: 'https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp',
-        channel_id: '216640',
-        enabled: true,
-      },
-      {
-        name: '政策法规库',
-        base_url: 'https://f.mnr.gov.cn/',
-        search_api: 'https://search.mnr.gov.cn/was5/web/search',
-        ajax_api: 'https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp',
-        channel_id: '174757',
-        enabled: false,
-      },
-    ]
-    taskForm.selectedDataSources = ['政府信息公开平台']
-  }
-}
-
-const handleTaskTypeChange = () => {
-  // 当任务类型切换时，如果是爬取任务，确保有数据源选择
-  if (taskForm.task_type === 'crawl_task' && availableDataSources.value.length > 0) {
-    if (taskForm.selectedDataSources.length === 0) {
-      const enabledSource = availableDataSources.value.find(ds => ds.enabled)
-      if (enabledSource) {
-        taskForm.selectedDataSources = [enabledSource.name]
-      } else if (availableDataSources.value.length > 0) {
-        taskForm.selectedDataSources = [availableDataSources.value[0].name]
-      }
-    }
-  } else {
-    // 切换到备份任务时，清空数据源选择
-    taskForm.selectedDataSources = []
-  }
-}
-
-const handleDialogOpened = async () => {
-  // 对话框打开时，重新加载数据源列表以获取最新的启用状态
-  await loadDataSources()
-  // 如果是爬取任务，确保有数据源选择
-  if (taskForm.task_type === 'crawl_task' && availableDataSources.value.length > 0) {
-    // 如果没有选择数据源，默认选择第一个启用的
-    if (taskForm.selectedDataSources.length === 0) {
-      const enabledSource = availableDataSources.value.find(ds => ds.enabled)
-      if (enabledSource) {
-        taskForm.selectedDataSources = [enabledSource.name]
-      } else if (availableDataSources.value.length > 0) {
-        taskForm.selectedDataSources = [availableDataSources.value[0].name]
-      }
-    }
-  }
-}
-
 onMounted(() => {
-  loadDataSources()
   fetchTasks()
   // 定时刷新任务列表
   refreshInterval = setInterval(() => {

@@ -79,22 +79,13 @@
     </el-card>
 
     <!-- 创建备份对话框 -->
-    <el-dialog v-model="showCreateDialog" title="创建备份" width="500px">
-      <el-form :model="backupForm" label-width="100px">
-        <el-form-item label="备份类型">
-          <el-select v-model="backupForm.backup_type" placeholder="请选择备份类型">
-            <el-option label="完整备份" value="full" />
-            <el-option label="增量备份" value="incremental" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreateBackup">
-          创建
-        </el-button>
-      </template>
-    </el-dialog>
+    <TaskCreationForm
+      v-model="showCreateDialog"
+      task-type="backup_task"
+      :disable-task-type-select="true"
+      @submit="handleBackupSubmit"
+      @cancel="showCreateDialog = false"
+    />
   </div>
 </template>
 
@@ -102,6 +93,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
+import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { backupsApi } from '../api/backups'
 import type { BackupRecord } from '../types/backup'
 import type { ApiError } from '../types/common'
@@ -116,10 +108,6 @@ const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0,
-})
-
-const backupForm = reactive({
-  backup_type: 'full',
 })
 
 const formatDateTime = (date: string) => {
@@ -178,13 +166,13 @@ const handlePageChange = () => {
   fetchBackups()
 }
 
-const handleCreateBackup = async () => {
+const handleBackupSubmit = async (formData: any) => {
   creating.value = true
   try {
-    await backupsApi.createBackup({ backup_type: backupForm.backup_type })
+    // 使用统一的API创建备份任务
+    await backupsApi.createBackup(formData.config)
     ElMessage.success('备份任务已创建')
     showCreateDialog.value = false
-    backupForm.backup_type = 'full'
     await fetchBackups()
   } catch (error) {
     const apiError = error as ApiError

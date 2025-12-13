@@ -678,15 +678,12 @@ const handleChangePassword = async () => {
           old_password: passwordForm.old_password,
           new_password: passwordForm.new_password,
         })
-        ElMessage.success('密码修改成功，请重新登录')
-        // 清空表单
-        passwordForm.old_password = ''
-        passwordForm.new_password = ''
-        passwordForm.confirm_password = ''
-        // 延迟跳转到登录页
-        setTimeout(() => {
-          window.location.href = '/login'
-        }, 1500)
+
+        // 立即登出并跳转到登录页
+        authStore.logout()
+        ElMessage.success('密码修改成功，请使用新密码重新登录')
+        router.push('/login')
+
       } catch (error) {
         const apiError = error as ApiError
         ElMessage.error(apiError.response?.data?.detail || '修改密码失败')
@@ -714,7 +711,7 @@ const handleGeneratePassword = async () => {
       const result = await authApi.generatePassword()
       if (result.success && result.new_password) {
         ElMessageBox.alert(
-          `新密码已生成并重置：<strong>${result.new_password}</strong><br/>请务必妥善保存！`,
+          `新密码已生成：<strong>${result.new_password}</strong><br/>系统将自动登出，请使用新密码重新登录。`,
           '密码重置成功',
           {
             confirmButtonText: '确定',
@@ -722,6 +719,7 @@ const handleGeneratePassword = async () => {
             dangerouslyUseHTMLString: true,
           }
         ).then(() => {
+          // 立即登出并跳转到登录页
           authStore.logout()
           router.push('/login')
         })

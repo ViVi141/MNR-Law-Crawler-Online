@@ -117,7 +117,7 @@ class TaskService:
 
             email_service = get_email_service()
             # 传入db以实时加载配置
-            if email_service.is_enabled(db) and email_service.to_addresses:
+            if email_service.is_enabled(db):
                 import asyncio
 
                 # 准备任务配置信息
@@ -144,7 +144,7 @@ class TaskService:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    loop.run_until_complete(
+                    result = loop.run_until_complete(
                         email_service.send_task_start_notification(
                             task_name=task.task_name,
                             task_type=task.task_type,
@@ -156,10 +156,25 @@ class TaskService:
                             db=db,  # 传入db以实时加载配置
                         )
                     )
+
+                    if result["success"]:
+                        logger.info(f"✅ 任务开始邮件通知发送成功: {task.task_name}")
+                    else:
+                        logger.warning(
+                            f"❌ 任务开始邮件通知发送失败: {result.get('message', '未知错误')}"
+                        )
+
+                except Exception as email_error:
+                    logger.error(
+                        f"❌ 发送任务开始邮件通知时发生异常: {email_error}",
+                        exc_info=True,
+                    )
                 finally:
                     loop.close()
+            else:
+                logger.debug(f"邮件服务未启用，跳过任务开始通知: {task.task_name}")
         except Exception as e:
-            logger.warning(f"发送任务开始通知邮件失败: {e}")
+            logger.error(f"❌ 任务开始邮件通知流程异常: {e}", exc_info=True)
 
         if background:
             # 在后台线程执行
@@ -946,16 +961,17 @@ class TaskService:
 
                                             email_service = get_email_service()
                                             # 传入db以实时加载配置
-                                            if (
-                                                email_service.is_enabled(db)
-                                                and email_service.to_addresses
-                                            ):
+                                            if email_service.is_enabled(db):
                                                 import asyncio
+
+                                                logger.debug(
+                                                    f"发送任务运行中邮件通知: {task.task_name}"
+                                                )
 
                                                 loop = asyncio.new_event_loop()
                                                 asyncio.set_event_loop(loop)
                                                 try:
-                                                    loop.run_until_complete(
+                                                    result = loop.run_until_complete(
                                                         email_service.send_task_completion_notification(
                                                             task_name=task.task_name,
                                                             task_status="running",
@@ -968,15 +984,30 @@ class TaskService:
                                                             db=db,
                                                         )
                                                     )
-                                                    email_notified = True  # 标记已发送通知，避免重复发送
-                                                    logger.info(
-                                                        f"已发送任务运行中邮件通知: {task.task_name}"
+
+                                                    if result["success"]:
+                                                        email_notified = True  # 标记已发送通知，避免重复发送
+                                                        logger.info(
+                                                            f"✅ 已发送任务运行中邮件通知: {task.task_name}"
+                                                        )
+                                                    else:
+                                                        logger.warning(
+                                                            f"❌ 发送任务运行中邮件通知失败: {result.get('message', '未知错误')}"
+                                                        )
+                                                except Exception as email_error:
+                                                    logger.error(
+                                                        f"❌ 发送任务运行中邮件通知时发生异常: {email_error}",
+                                                        exc_info=True,
                                                     )
                                                 finally:
                                                     loop.close()
-                                        except Exception as email_error:
+                                            else:
+                                                logger.debug(
+                                                    f"邮件服务未启用，跳过任务运行中通知: {task.task_name}"
+                                                )
+                                        except Exception as e:
                                             logger.warning(
-                                                f"发送任务运行中邮件通知失败: {email_error}"
+                                                f"发送任务运行中邮件通知失败: {e}"
                                             )
 
                             except Exception as e:
@@ -1227,14 +1258,20 @@ class TaskService:
                     from .email_service import get_email_service
 
                     email_service = get_email_service()
-                    # 传入db以实时加载配置
-                    if email_service.is_enabled(db) and email_service.to_addresses:
+                    # 传入db以实时加载配置，确保使用最新配置
+                    if email_service.is_enabled(db):
                         import asyncio
 
+                        # 记录邮件通知尝试
+                        logger.info(
+                            f"尝试发送任务完成邮件通知: {task.task_name} (状态: completed)"
+                        )
+
+                        # 创建新的时间循环来发送异步邮件
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
-                            loop.run_until_complete(
+                            result = loop.run_until_complete(
                                 email_service.send_task_completion_notification(
                                     task_name=task.task_name,
                                     task_status="completed",
@@ -1246,10 +1283,29 @@ class TaskService:
                                     db=db,  # 传入db以实时加载配置
                                 )
                             )
+
+                            if result["success"]:
+                                logger.info(
+                                    f"✅ 任务完成邮件通知发送成功: {task.task_name}"
+                                )
+                            else:
+                                logger.error(
+                                    f"❌ 任务完成邮件通知发送失败: {result.get('message', '未知错误')}"
+                                )
+
+                        except Exception as email_error:
+                            logger.error(
+                                f"❌ 发送任务完成邮件通知时发生异常: {email_error}",
+                                exc_info=True,
+                            )
                         finally:
                             loop.close()
+                    else:
+                        logger.debug(
+                            f"邮件服务未启用或未配置，跳过任务完成通知: {task.task_name}"
+                        )
                 except Exception as e:
-                    logger.warning(f"发送任务完成通知邮件失败: {e}")
+                    logger.error(f"❌ 任务完成邮件通知流程异常: {e}", exc_info=True)
 
             except Exception as e:
                 logger.error(f"任务执行失败: {e}", exc_info=True)
@@ -1297,14 +1353,18 @@ class TaskService:
                     from .email_service import get_email_service
 
                     email_service = get_email_service()
-                    # 传入db以实时加载配置
-                    if email_service.is_enabled(db) and email_service.to_addresses:
+                    # 传入db以实时加载配置，确保使用最新配置
+                    if email_service.is_enabled(db):
                         import asyncio
 
+                        # 记录邮件通知尝试
+                        logger.info(f"尝试发送任务失败邮件通知: {task.task_name}")
+
+                        # 创建新的时间循环来发送异步邮件
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
-                            loop.run_until_complete(
+                            result = loop.run_until_complete(
                                 email_service.send_task_completion_notification(
                                     task_name=task.task_name,
                                     task_status="failed",
@@ -1325,8 +1385,31 @@ class TaskService:
                                     db=db,  # 传入db以实时加载配置
                                 )
                             )
+
+                            if result["success"]:
+                                logger.info(
+                                    f"✅ 任务失败邮件通知发送成功: {task.task_name}"
+                                )
+                            else:
+                                logger.error(
+                                    f"❌ 任务失败邮件通知发送失败: {result.get('message', '未知错误')}"
+                                )
+
+                        except Exception as email_error:
+                            logger.error(
+                                f"❌ 发送任务失败邮件通知时发生异常: {email_error}",
+                                exc_info=True,
+                            )
                         finally:
                             loop.close()
+                    else:
+                        logger.debug(
+                            f"邮件服务未启用或未配置，跳过任务失败通知: {task.task_name}"
+                        )
+                except Exception as notify_error:
+                    logger.error(
+                        f"❌ 任务失败邮件通知流程异常: {notify_error}", exc_info=True
+                    )
                 except Exception as email_error:
                     logger.warning(f"发送任务失败通知邮件失败: {email_error}")
 
