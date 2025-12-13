@@ -9,6 +9,7 @@ import random
 import json
 import logging
 import warnings
+import re
 from typing import Dict, Optional, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
@@ -401,25 +402,15 @@ class APIClient:
                     # 不移除空的元素（可能包含有用的空格或换行），只移除明显的空白元素
                     # 注释掉原来的激进删除逻辑，改为在文本清理阶段处理
 
-                    # 优先提取 Custom_UnionStyle 中的内容（这是真正的正文）
+                    # 根据页面类型选择不同的解析方式
                     custom_style = content_div.find("div", class_="Custom_UnionStyle")
+
                     if custom_style:
-                        # Custom_UnionStyle 包含了完整的正文内容
-                        # 需要特殊处理 span 标签内的内容
+                        # 公开目录页面：使用Custom_UnionStyle专用解析
                         content = self._extract_custom_union_style_content(custom_style)
                     else:
-                        # 否则使用整个content_div的内容
-                        # 使用strip=False保留原始文本结构，避免丢失内容
-                        content = content_div.get_text(separator="\n", strip=False)
-                        # 手动清理每行的首尾空白，但保留换行结构
-                        lines = content.split("\n")
-                        content = "\n".join(
-                            [
-                                line.strip()
-                                for line in lines
-                                if line.strip() or line == ""
-                            ]
-                        )
+                        # 政策库页面：使用智能文本合并解析
+                        content = self._extract_policy_content(content_div)
 
                     # 进一步清洗文本内容
                     content = self._clean_content(content)
@@ -502,21 +493,109 @@ class APIClient:
         # 合并段落，段落之间用换行符分隔
         content = "\n\n".join(paragraphs)
 
-        # 最终清理
-        import re
+        return content
 
-        # 移除连续的换行符（保留最多两个）
-        content = re.sub(r"\n{3,}", "\n\n", content)
-        # 移除段落内的多余空格
-        lines = content.split("\n")
-        cleaned_lines = []
+    def _merge_text_lines(self, lines):
+        """合并被HTML解析错误拆分的文本行"""
+        import re  # 确保在方法作用域内导入re模块
+
+        if not lines:
+            return lines
+
+        merged = []
+        current_line = ""
+
         for line in lines:
-            # 移除行首尾空白，但保留段落结构
-            cleaned_line = line.strip()
-            if cleaned_line:
-                cleaned_lines.append(cleaned_line)
+            line = line.strip()
+            if not line:
+                # 空行：如果当前行有内容，先保存当前行，然后添加空行
+                if current_line:
+                    merged.append(current_line)
+                    current_line = ""
+                merged.append("")
+                continue
 
-        return "\n\n".join(cleaned_lines)
+            # 检查是否应该与前一行合并
+            should_merge = False
+
+            # 规则1：年份和日期连续合并（如 "2011年" + "2" + "月" + "22" + "日"）
+            if re.search(r"^\d{4}年$", current_line) and re.search(r"^\d{1,2}$", line):
+                should_merge = True
+            elif re.search(r"^\d{4}年\d{1,2}$", current_line) and line == "月":
+                should_merge = True
+            elif re.search(r"^\d{4}年\d{1,2}月$", current_line) and re.search(
+                r"^\d{1,2}$", line
+            ):
+                should_merge = True
+            elif re.search(r"^\d{4}年\d{1,2}月\d{1,2}$", current_line) and line == "日":
+                should_merge = True
+            elif re.search(r"^\d{1,2}$", current_line) and line in [
+                "月",
+                "日",
+                "号",
+                "条",
+                "款",
+            ]:
+                should_merge = True
+
+            # 规则2：序号被拆分（如 "第" + "592" + "号"）
+            elif current_line == "第" and re.search(r"^\d+$", line):
+                should_merge = True
+            elif re.search(r"^第\d+$", current_line) and line == "号":
+                should_merge = True
+
+            # 规则3：职务和人名（如 "总理" + "温家宝"）
+            elif current_line in ["总理", "部长", "局长", "主任", "主席"] and re.search(
+                r"^[\u4e00-\u9fa5]+$", line
+            ):
+                should_merge = True
+
+            # 规则4：标点符号前后的拆分
+            elif line in [
+                "。",
+                "，",
+                "；",
+                "：",
+                "？",
+                "！",
+                "、",
+                "》",
+                "）",
+                "】",
+                "」",
+                "』",
+            ]:
+                should_merge = True
+            elif current_line in ["《", "（", "【", "「", "『"]:
+                should_merge = True
+
+            # 规则5：连续的中文字符合并
+            elif (
+                re.search(r"^[\u4e00-\u9fa5]+$", current_line)
+                and re.search(r"^[\u4e00-\u9fa5]+$", line)
+                and len(current_line + line) < 50
+            ):
+                should_merge = True
+
+            # 规则6：数字和中文单位的合并
+            elif re.search(r"^\d+$", current_line) and re.search(
+                r"^[\u4e00-\u9fa5]+$", line
+            ):
+                should_merge = True
+
+            if should_merge:
+                current_line += line
+            else:
+                # 保存当前行，开始新行
+                if current_line:
+                    merged.append(current_line)
+                current_line = line
+
+        # 保存最后一行
+        if current_line:
+            merged.append(current_line)
+
+        return merged
 
     def _extract_metadata(self, soup: BeautifulSoup) -> Dict[str, str]:
         """从详情页提取元信息（针对自然资源部网站的特定结构，支持 gi.mnr.gov.cn 和 f.mnr.gov.cn）
@@ -755,6 +834,107 @@ class APIClient:
                 )
 
         return metadata
+
+    def _extract_policy_content(self, content_div: BeautifulSoup) -> str:
+        """提取政策库页面的内容
+
+        专门用于解析政策库页面（如f.mnr.gov.cn）的正文内容。
+        按照HTML段落结构提取内容，每个<p>元素作为一个段落。
+
+        Args:
+            content_div: content div元素
+
+        Returns:
+            提取并格式化的正文内容
+        """
+        if not content_div:
+            return ""
+
+        paragraphs = []
+
+        # 优先查找所有的<p>元素，每个<p>作为一个段落
+        p_elements = content_div.find_all("p", recursive=True)
+
+        for p in p_elements:
+            # 跳过空的段落
+            if not p.get_text(strip=True):
+                continue
+
+            # 跳过导航、操作等非内容段落
+            text = p.get_text(strip=True)
+            if len(text) < 10 and text in [
+                "打印",
+                "分享",
+                "字号",
+                "关闭",
+                "下载",
+                "返回顶部",
+                "大",
+                "中",
+                "小",
+                "分享到",
+                "收藏",
+            ]:
+                continue
+
+            # 获取段落的完整文本（包括内部的span等元素）
+            paragraph_text = p.get_text(separator="", strip=True)
+
+            # 清理多余的空白字符，但保留段落内的空格
+            import re
+
+            paragraph_text = re.sub(r"\s+", " ", paragraph_text.strip())
+
+            if paragraph_text:
+                paragraphs.append(paragraph_text)
+
+        # 如果没有找到<p>元素，尝试查找其他可能的段落容器
+        if not paragraphs:
+            # 查找div元素作为段落
+            div_elements = content_div.find_all("div", recursive=True)
+            for div in div_elements:
+                if not div.get_text(strip=True):
+                    continue
+
+                text = div.get_text(strip=True)
+                if len(text) < 10 and text in [
+                    "打印",
+                    "分享",
+                    "字号",
+                    "关闭",
+                    "下载",
+                    "返回顶部",
+                    "大",
+                    "中",
+                    "小",
+                    "分享到",
+                    "收藏",
+                ]:
+                    continue
+
+                # 检查是否是真正的内容div（有足够的内容）
+                if len(text) > 20:  # 跳过太短的内容
+                    paragraph_text = div.get_text(separator="", strip=True)
+                    import re
+
+                    paragraph_text = re.sub(r"\s+", " ", paragraph_text.strip())
+
+                    if paragraph_text:
+                        paragraphs.append(paragraph_text)
+
+        # 如果还是没找到，尝试直接提取所有文本作为单个段落
+        if not paragraphs:
+            all_text = content_div.get_text(separator=" ", strip=True)
+            if all_text:
+                import re
+
+                all_text = re.sub(r"\s+", " ", all_text.strip())
+                paragraphs = [all_text]
+
+        # 合并段落，每个段落一行，段落之间用空行分隔
+        content = "\n\n".join(paragraphs)
+
+        return content
 
     def _clean_content(self, content: str) -> str:
         """清洗正文内容，移除不需要的元素，修复被错误拆分的文本

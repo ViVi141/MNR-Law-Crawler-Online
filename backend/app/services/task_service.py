@@ -841,79 +841,41 @@ class TaskService:
                                 hasattr(policy, "_attachment_paths")
                                 and policy._attachment_paths
                             ):
-                                from ..models.attachment import Attachment
+                                try:
+                                    # 使用policy_service的统一附件处理方法
+                                    attachment_result = self.policy_service.process_policy_attachments_after_crawl(
+                                        db=db,
+                                        policy_id=db_policy.id,
+                                        attachment_data=policy._attachment_paths,
+                                        task_id=task_id,
+                                        auto_merge=True,  # 自动尝试合并附件内容到正文
+                                    )
 
-                                for att_info in policy._attachment_paths:
-                                    if att_info.get("storage_path") and os.path.exists(
-                                        att_info["storage_path"]
+                                    if (
+                                        attachment_result.get("attachments_saved", 0)
+                                        > 0
                                     ):
-                                        try:
-                                            # 通过存储服务保存附件（传入task_id，确保附件路径独立）
-                                            storage_result = (
-                                                storage_service.save_attachment(
-                                                    db_policy.id,
-                                                    att_info.get("file_name", ""),
-                                                    att_info["storage_path"],
-                                                    task_id=task_id,
-                                                )
+                                        logger.info(
+                                            f"政策 {db_policy.id} 保存了 {attachment_result['attachments_saved']} 个附件"
+                                        )
+
+                                        if attachment_result.get("content_merged"):
+                                            logger.info(
+                                                f"政策 {db_policy.id} 的附件内容已自动合并到正文"
                                             )
-                                            if storage_result.get("success"):
-                                                # 查找或创建附件记录
-                                                attachment = (
-                                                    db.query(Attachment)
-                                                    .filter(
-                                                        Attachment.policy_id
-                                                        == db_policy.id,
-                                                        Attachment.file_url
-                                                        == att_info.get("url", ""),
-                                                    )
-                                                    .first()
-                                                )
-                                                if not attachment:
-                                                    attachment = Attachment(
-                                                        policy_id=db_policy.id,
-                                                        file_name=att_info.get(
-                                                            "name",
-                                                            att_info.get(
-                                                                "file_name", ""
-                                                            ),
-                                                        ),
-                                                        file_url=att_info.get(
-                                                            "url", ""
-                                                        ),
-                                                        file_size=(
-                                                            os.path.getsize(
-                                                                att_info["storage_path"]
-                                                            )
-                                                            if os.path.exists(
-                                                                att_info["storage_path"]
-                                                            )
-                                                            else 0
-                                                        ),
-                                                        file_type=os.path.splitext(
-                                                            att_info.get(
-                                                                "file_name", ""
-                                                            )
-                                                        )[1].lstrip("."),
-                                                        file_path=storage_result.get(
-                                                            "local_path"
-                                                        ),  # 使用正确的字段名
-                                                    )
-                                                    db.add(attachment)
-                                            else:
-                                                attachment.file_path = (
-                                                    storage_result.get("local_path")
-                                                )  # 使用正确的字段名
-                                                attachment.file_s3_key = (
-                                                    storage_result.get("s3_key")
-                                                )  # 使用正确的字段名
-                                                logger.debug(
-                                                    f"政策 {db_policy.id} 的附件已保存到存储服务"
-                                                )
-                                        except Exception as e:
+                                        elif attachment_result.get("merge_errors"):
                                             logger.warning(
-                                                f"保存政策 {db_policy.id} 的附件失败: {e}"
+                                                f"政策 {db_policy.id} 附件内容合并失败: {'; '.join(attachment_result['merge_errors'])}"
                                             )
+                                    else:
+                                        logger.debug(
+                                            f"政策 {db_policy.id} 没有附件需要处理"
+                                        )
+
+                                except Exception as e:
+                                    logger.warning(
+                                        f"处理政策 {db_policy.id} 的附件失败: {e}"
+                                    )
 
                             # 提交文件路径更新
                             db.commit()

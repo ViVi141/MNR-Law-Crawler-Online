@@ -194,7 +194,7 @@ const checkEmailAvailability = async () => {
   try {
     const result = await configApi.checkEmailAvailable()
     emailAvailable.value = result.available || false
-  } catch (_error) {
+  } catch {
     // 如果检查失败，默认不显示忘记密码功能
     emailAvailable.value = false
   }

@@ -140,6 +140,31 @@ export const policiesApi = {
       .then((res) => res.data)
   },
 
+  // 批量下载附件
+  downloadAttachmentsBatch(
+    policyId: number,
+    attachmentIds: number[],
+    format: 'zip' | 'individual' = 'zip'
+  ): Promise<Blob> {
+    return apiClient
+      .post(`/api/policies/${policyId}/attachments/download-batch`, {
+        attachment_ids: attachmentIds,
+        format: format
+      }, {
+        responseType: 'blob',
+      })
+      .then((res) => res.data)
+  },
+
+  // 下载全部附件
+  downloadAllAttachments(policyId: number): Promise<Blob> {
+    return apiClient
+      .get(`/api/policies/${policyId}/attachments/download-all`, {
+        responseType: 'blob',
+      })
+      .then((res) => res.data)
+  },
+
   // 获取所有数据源名称列表
   getSourceNames(): Promise<string[]> {
     return apiClient.get('/api/policies/meta/source-names').then((res) => res.data)
@@ -152,6 +177,39 @@ export const policiesApi = {
       params.source_name = sourceName.trim()
     }
     return apiClient.get('/api/policies/meta/categories', { params }).then((res) => res.data)
+  },
+
+  // 将附件内容合并到正文
+  mergeAttachmentsToContent(
+    policyId: number,
+    attachmentIds: number[],
+    separator?: string
+  ): Promise<{
+    message: string
+    policy_id: number
+    merged_content_length: number
+    processed_attachments: Array<{
+      id: number
+      filename: string
+      content_length?: number
+      success: boolean
+      error?: string
+    }>
+    errors: string[]
+  }> {
+    return apiClient.post(`/api/policies/${policyId}/merge-attachments`, {
+      attachment_ids: attachmentIds,
+      separator: separator || '\n\n--- 附件内容 ---\n\n'
+    }).then((res) => res.data)
+  },
+
+  // 获取附件处理信息
+  getAttachmentInfo(): Promise<{
+    supported_formats: string[]
+    dependencies: Record<string, boolean>
+    description: string
+  }> {
+    return apiClient.get('/api/policies/attachment-info').then((res) => res.data)
   },
 }
 

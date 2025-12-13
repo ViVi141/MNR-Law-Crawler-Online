@@ -44,6 +44,15 @@ except ImportError:
     POWORD_AVAILABLE = False
     doc2docx = None
 
+# 检查 mammoth（DOCX文本提取）
+try:
+    import mammoth
+
+    MAMMOTH_AVAILABLE = True
+except ImportError:
+    MAMMOTH_AVAILABLE = False
+    mammoth = None
+
 
 class DocumentConverter:
     """文档转换器"""
@@ -219,6 +228,80 @@ class DocumentConverter:
 
         except Exception as e:
             print(f"    [X] PDF提取失败: {e}")
+            return None
+
+    def extract_pdf_text(self, pdf_path: str) -> Optional[str]:
+        """从PDF文件中提取纯文本内容（不包含Markdown格式）
+
+        Args:
+            pdf_path: PDF文件路径
+
+        Returns:
+            纯文本内容
+        """
+        if not PDF_AVAILABLE:
+            return None
+
+        try:
+            reader = PdfReader(pdf_path)
+            text_content = []
+
+            for page_num, page in enumerate(reader.pages, 1):
+                try:
+                    text = page.extract_text()
+                    if text and text.strip():
+                        text_content.append(text.strip())
+                except Exception:
+                    continue
+
+            if text_content:
+                # 添加页面分隔符
+                return "\n\n--- 页面分隔符 ---\n\n".join(text_content)
+            return None
+
+        except Exception:
+            return None
+
+    def extract_docx_text(self, docx_path: str) -> Optional[str]:
+        """从DOCX文件中提取纯文本内容
+
+        Args:
+            docx_path: DOCX文件路径
+
+        Returns:
+            纯文本内容
+        """
+        # 检查是否有mammoth库（优先使用，更适合提取纯文本）
+        try:
+            import mammoth
+
+            with open(docx_path, "rb") as file:
+                result = mammoth.extract_raw_text(file)
+                text_content = result.value
+                return (
+                    text_content.strip()
+                    if text_content and text_content.strip()
+                    else None
+                )
+        except ImportError:
+            pass
+
+        # 备用方案：使用python-docx
+        if not DOCX_AVAILABLE:
+            return None
+
+        try:
+            doc = Document(docx_path)
+            text_content = []
+
+            for paragraph in doc.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    text_content.append(text)
+
+            return "\n\n".join(text_content) if text_content else None
+
+        except Exception:
             return None
 
     def doc_to_markdown(self, doc_path: str) -> Optional[str]:

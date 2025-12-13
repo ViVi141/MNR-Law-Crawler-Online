@@ -72,10 +72,53 @@
         </div>
 
         <div v-if="policy.attachments && policy.attachments.length > 0" class="attachments-section">
-          <h3>附件</h3>
-          <el-table :data="policy.attachments" stripe>
+          <div class="attachments-header">
+            <h3>附件 ({{ policy.attachments.length }}个)</h3>
+            <div class="attachment-actions">
+              <el-button
+                type="primary"
+                :disabled="selectedAttachments.length === 0 || mergeLoading"
+                @click="mergeAttachmentsToContent"
+              >
+                {{ mergeLoading ? '处理中...' : `保存到正文 (${selectedAttachments.length})` }}
+              </el-button>
+              <el-button
+                type="success"
+                :disabled="selectedAttachments.length === 0 || downloadLoading"
+                @click="downloadSelectedAttachments"
+              >
+                {{ downloadLoading ? '下载中...' : `下载选中 (${selectedAttachments.length})` }}
+              </el-button>
+              <el-button
+                type="warning"
+                :disabled="downloadAllLoading"
+                @click="downloadAllAttachments"
+              >
+                {{ downloadAllLoading ? '下载中...' : '下载全部' }}
+              </el-button>
+              <el-button
+                type="info"
+                plain
+                @click="checkAttachmentSupport"
+              >
+                支持格式
+              </el-button>
+            </div>
+          </div>
+          <el-table
+            :data="policy.attachments"
+            stripe
+            @selection-change="handleSelectionChange"
+          >
+            <el-table-column type="selection" width="55" />
             <el-table-column prop="filename" label="文件名" />
-            <el-table-column prop="file_type" label="类型" width="100" />
+            <el-table-column prop="file_type" label="类型" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getFileTypeColor(row.file_type)">
+                  {{ row.file_type || '未知' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="大小" width="120">
               <template #default="{ row }">
                 {{ formatFileSize(row.file_size) }}
@@ -110,7 +153,11 @@ const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
+const mergeLoading = ref(false)
+const downloadLoading = ref(false)
+const downloadAllLoading = ref(false)
 const policy = ref<Policy | null>(null)
+const selectedAttachments = ref<Attachment[]>([])
 
 const formatDate = (date: string) => {
   if (!date || date === '') {
@@ -134,10 +181,10 @@ const formatFileSize = (bytes: number) => {
 }
 
 const formatContent = (content: string) => {
-  // HTML内容格式化：智能处理换行和分段，修复常见的分段错误
+  // HTML内容格式化：后端已处理大部分格式问题，前端只做基本处理
   if (!content) return ''
 
-  // 先转义HTML特殊字符
+  // 转义HTML特殊字符
   let formatted = content
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -145,34 +192,13 @@ const formatContent = (content: string) => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 
-  // 1. 修复被错误拆分的年份（如 \n2022\n、\n2022年\n）
-  formatted = formatted.replace(/\n+(\d{4})(年?)\s*\n+/g, '$1$2')
-
-  // 2. 修复被错误拆分的序号和条款（如 \n第1条\n、\n第一款\n）
-  formatted = formatted.replace(/\n+(第?[一二三四五六七八九十\d]+[号条款项节章款])(?:\s*\n+)?/g, '$1')
-
-  // 3. 修复被错误拆分的括号内容（如 \n(1)\n、\n（一）\n）
-  formatted = formatted.replace(/\n+(\([一二三四五六七八九十\d]+\))\s*\n+/g, '$1')
-  formatted = formatted.replace(/\n+(（[一二三四五六七八九十\d]+）)\s*\n+/g, '$1')
-
-  // 4. 修复标点符号前的错误换行（如 \n。\n、\n，\n）
-  formatted = formatted.replace(/\n+([。？！，、；：])\s*\n+/g, '$1')
-
-  // 5. 修复引号和书名号前的错误换行（如 \n《\n、\n》\n）
-  formatted = formatted.replace(/\n+([\'"《》【】「」『』])\s*\n+/g, '$1')
-
-  // 6. 清理多余的连续换行符
-  formatted = formatted.replace(/\n{4,}/g, '\n\n\n')
-
-  // 7. 将换行符转换为HTML换行，但保留段落结构
-  // 三个连续换行符视为段落分隔
-  formatted = formatted.replace(/\n{3}/g, '\n\n')
-  // 两个连续换行符保留为双换行
-  formatted = formatted.replace(/\n{2}/g, '\n\n')
+  // 将换行符转换为HTML换行，保留段落结构
+  // 多个连续换行符视为段落分隔
+  formatted = formatted.replace(/\n{3,}/g, '\n\n')
   // 单个换行符转换为<br/>
   formatted = formatted.replace(/\n/g, '<br/>')
 
-  // 8. 清理多余的连续<br/>标签（最多保留两个）
+  // 清理多余的连续<br/>标签（最多保留两个）
   formatted = formatted.replace(/(<br\/>\s*){3,}/g, '<br/><br/>')
 
   return formatted
@@ -189,6 +215,18 @@ const fetchPolicy = async () => {
   loading.value = true
   try {
     policy.value = await policiesApi.getPolicyById(id)
+
+    // 检查是否有附件，如果有附件且支持合并功能，给出提示
+    if (policy.value.attachments && policy.value.attachments.length > 0) {
+      // 延迟一点时间再显示提示，让页面先渲染完成
+      setTimeout(() => {
+        ElMessage.info({
+          message: `发现 ${policy.value!.attachments!.length} 个附件，可选择合并到正文或单独下载`,
+          duration: 5000,
+          showClose: true
+        })
+      }, 1000)
+    }
   } catch (error) {
     const apiError = error as ApiError
     ElMessage.error(apiError.response?.data?.detail || '获取政策详情失败')
@@ -243,6 +281,139 @@ const downloadAttachment = async (attachment: Attachment) => {
   } catch (error) {
     const apiError = error as ApiError
     ElMessage.error(apiError.response?.data?.detail || '下载附件失败')
+  }
+}
+
+const handleSelectionChange = (selection: Attachment[]) => {
+  selectedAttachments.value = selection
+}
+
+const getFileTypeColor = (fileType: string) => {
+  const typeColors: Record<string, string> = {
+    'pdf': 'success',
+    'docx': 'primary',
+    'doc': 'warning',
+    'txt': 'info'
+  }
+  return typeColors[fileType?.toLowerCase()] || ''
+}
+
+const mergeAttachmentsToContent = async () => {
+  if (!policy.value || selectedAttachments.value.length === 0) return
+
+  mergeLoading.value = true
+
+  try {
+    const attachmentIds = selectedAttachments.value.map(att => att.id)
+    const result = await policiesApi.mergeAttachmentsToContent(
+      policy.value.id,
+      attachmentIds
+    )
+
+    ElMessage.success(`成功合并 ${result.processed_attachments.filter(p => p.success).length} 个附件内容`)
+
+    // 显示处理结果详情
+    if (result.errors.length > 0) {
+      ElMessage.warning(`部分附件处理失败: ${result.errors.join('; ')}`)
+    }
+
+    // 重新加载政策详情以显示更新后的内容
+    await fetchPolicy()
+
+    // 清空选择
+    selectedAttachments.value = []
+
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '合并附件内容失败')
+  } finally {
+    mergeLoading.value = false
+  }
+}
+
+const checkAttachmentSupport = async () => {
+  try {
+    const info = await policiesApi.getAttachmentInfo()
+    const supportedFormats = info.supported_formats.join(', ')
+    const availableDeps = Object.entries(info.dependencies)
+      .filter(([_, available]) => available)
+      .map(([name]) => name)
+      .join(', ')
+
+    ElMessage.info(`支持格式: ${supportedFormats} | 已安装依赖: ${availableDeps}`)
+  } catch {
+    ElMessage.warning('无法获取附件支持信息')
+  }
+}
+
+const downloadSelectedAttachments = async () => {
+  if (!policy.value || selectedAttachments.value.length === 0) return
+
+  downloadLoading.value = true
+
+  try {
+    const attachmentIds = selectedAttachments.value.map(att => att.id)
+
+    let blob: Blob
+    let filename: string
+
+    if (selectedAttachments.value.length === 1) {
+      // 单个文件下载
+      blob = await policiesApi.downloadAttachment(policy.value.id, attachmentIds[0])
+      filename = selectedAttachments.value[0].filename
+    } else {
+      // 批量下载zip包
+      blob = await policiesApi.downloadAttachmentsBatch(policy.value.id, attachmentIds, 'zip')
+      const safeTitle = (policy.value.title || '政策附件').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')
+      filename = `${safeTitle}_附件_${selectedAttachments.value.length}个.zip`
+    }
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success(`下载完成: ${filename}`)
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '下载附件失败')
+  } finally {
+    downloadLoading.value = false
+  }
+}
+
+const downloadAllAttachments = async () => {
+  if (!policy.value) return
+
+  downloadAllLoading.value = true
+
+  try {
+    const blob = await policiesApi.downloadAllAttachments(policy.value.id)
+
+    const safeTitle = (policy.value.title || '政策附件').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')
+    const filename = `${safeTitle}_全部附件.zip`
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success(`下载完成: ${filename}`)
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '下载全部附件失败')
+  } finally {
+    downloadAllLoading.value = false
   }
 }
 
@@ -347,6 +518,22 @@ onMounted(() => {
     
     // 附件表格
     :deep(.attachments-section) {
+      .attachments-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+
+        h3 {
+          margin: 0;
+        }
+
+        .attachment-actions {
+          display: flex;
+          gap: 10px;
+        }
+      }
+
       .el-table {
         .el-table__body-wrapper {
           overflow-x: auto;

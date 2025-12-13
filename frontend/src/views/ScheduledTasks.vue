@@ -95,6 +95,17 @@ import type {
   ScheduledTaskCreateRequest,
   ScheduledTaskListItem,
 } from '../types/scheduledTask'
+import type { TaskConfig } from '../types/common'
+
+// 定时任务表单数据类型
+interface ScheduledTaskFormData {
+  scheduled_task_type: string
+  task_name: string
+  cron_expression: string
+  config: TaskConfig
+  is_enabled: boolean
+  [key: string]: unknown
+}
 import type { ApiError } from '../types/common'
 import dayjs from 'dayjs'
 
@@ -102,7 +113,7 @@ const loading = ref(false)
 const saving = ref(false)
 const scheduledTasks = ref<ScheduledTask[]>([])
 const showCreateDialog = ref(false)
-const editingTask = ref<ScheduledTask | null>(null)
+const editingTask = ref<ScheduledTask | undefined>(undefined)
 
 const pagination = reactive({
   page: 1,
@@ -206,10 +217,10 @@ const handleDelete = async (task: ScheduledTask) => {
 
 const handleCancelDialog = () => {
   showCreateDialog.value = false
-  editingTask.value = null
+  editingTask.value = undefined
 }
 
-const handleScheduledTaskSubmit = async (formData: any) => {
+const handleScheduledTaskSubmit = async (formData: ScheduledTaskFormData) => {
   saving.value = true
   try {
     if (editingTask.value) {

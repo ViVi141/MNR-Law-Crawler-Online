@@ -155,6 +155,14 @@ import { Plus, Delete, Upload, Download } from '@element-plus/icons-vue'
 import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { backupsApi } from '../api/backups'
 import type { BackupRecord } from '../types/backup'
+
+// 备份表单数据类型
+interface BackupFormData {
+  config: {
+    backup_type?: string
+  }
+  [key: string]: unknown
+}
 import type { ApiError } from '../types/common'
 import type { FormInstance, FormRules, UploadFile } from 'element-plus'
 import dayjs from 'dayjs'
@@ -242,7 +250,7 @@ const handlePageChange = () => {
   fetchBackups()
 }
 
-const handleBackupSubmit = async (formData: any) => {
+const handleBackupSubmit = async (formData: BackupFormData) => {
   creating.value = true
   try {
     // 使用统一的API创建备份任务

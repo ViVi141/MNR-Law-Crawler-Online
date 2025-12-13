@@ -287,6 +287,16 @@ import { Plus, Download } from '@element-plus/icons-vue'
 import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { tasksApi, type TaskListParams } from '../api/tasks'
 import type { Task, TaskCreateRequest } from '../types/task'
+import type { TaskConfig } from '../types/common'
+
+// 任务表单数据类型
+interface TaskFormData {
+  task_type: string
+  task_name: string
+  config: TaskConfig
+  autoStart?: boolean
+  [key: string]: unknown
+}
 import type { ApiError } from '../types/common'
 import dayjs from 'dayjs'
 
@@ -381,7 +391,7 @@ const handlePageChange = () => {
   fetchTasks()
 }
 
-const handleTaskSubmit = async (formData: any) => {
+const handleTaskSubmit = async (formData: TaskFormData) => {
   creating.value = true
   try {
     const request: TaskCreateRequest = {

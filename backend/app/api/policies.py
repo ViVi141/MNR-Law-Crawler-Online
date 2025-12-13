@@ -2,7 +2,7 @@
 政策API路由
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 import logging
@@ -491,3 +491,269 @@ def download_attachment(
     return FileResponse(
         file_path, media_type="application/octet-stream", filename=attachment.file_name
     )
+
+
+@router.post("/{policy_id}/attachments/download-batch")
+async def download_attachments_batch(
+    policy_id: int,
+    request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量下载附件或生成压缩包
+
+    请求体示例:
+    {
+        "attachment_ids": [1, 2, 3],
+        "format": "zip"  // 可选: "zip" 或 "individual"
+    }
+    """
+    try:
+        attachment_ids = request.get("attachment_ids", [])
+        download_format = request.get("format", "zip")  # 默认生成zip包
+
+        if not attachment_ids:
+            raise HTTPException(status_code=400, detail="必须指定至少一个附件ID")
+
+        if not isinstance(attachment_ids, list) or not all(
+            isinstance(id, int) for id in attachment_ids
+        ):
+            raise HTTPException(status_code=400, detail="attachment_ids必须是整数列表")
+
+        # 验证政策存在
+        policy = policy_service.get_policy_by_id(db, policy_id)
+        if not policy:
+            raise HTTPException(status_code=404, detail="政策不存在")
+
+        # 获取附件信息
+        from ..models.attachment import Attachment
+
+        attachments = (
+            db.query(Attachment)
+            .filter(Attachment.id.in_(attachment_ids))
+            .filter(Attachment.policy_id == policy_id)
+            .all()
+        )
+
+        if not attachments:
+            raise HTTPException(status_code=404, detail="未找到指定的附件")
+
+        if len(attachments) != len(attachment_ids):
+            found_ids = {att.id for att in attachments}
+            missing_ids = set(attachment_ids) - found_ids
+            raise HTTPException(
+                status_code=404, detail=f"以下附件不存在: {list(missing_ids)}"
+            )
+
+        # 如果只有一个附件且format不是zip，直接返回单个文件
+        if len(attachments) == 1 and download_format != "zip":
+            attachment = attachments[0]
+            # 使用现有的单个下载逻辑
+            return await download_attachment(policy_id, attachment.id, db, current_user)
+
+        # 生成zip压缩包
+        import zipfile
+        import io
+
+        # 使用存储服务获取文件路径
+        from ..services.storage_service import StorageService
+
+        storage_service = StorageService()
+
+        # 创建内存中的zip文件
+        zip_buffer = io.BytesIO()
+
+        try:
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                files_added = 0
+
+                for attachment in attachments:
+                    file_path = None
+
+                    # 尝试获取文件路径
+                    if attachment.file_path and os.path.exists(attachment.file_path):
+                        file_path = attachment.file_path
+                    elif attachment.file_s3_key:
+                        # 从S3下载
+                        file_path = storage_service.get_attachment_file_path(
+                            policy_id, attachment.file_name, task_id=policy.task_id
+                        )
+
+                    if file_path and os.path.exists(file_path):
+                        # 添加到zip包中
+                        arcname = attachment.file_name
+                        # 确保文件名不重复
+                        if files_added > 0:
+                            base, ext = os.path.splitext(arcname)
+                            arcname = f"{base}_{files_added + 1}{ext}"
+
+                        zip_file.write(file_path, arcname)
+                        files_added += 1
+                        logger.debug(f"添加文件到zip: {arcname}")
+                    else:
+                        logger.warning(f"附件文件不存在: {attachment.file_name}")
+
+            if files_added == 0:
+                raise HTTPException(status_code=404, detail="没有可下载的附件文件")
+
+            zip_buffer.seek(0)
+
+            # 生成zip文件名
+            safe_title = "".join(
+                c
+                for c in (policy.title or "政策附件")
+                if c.isalnum() or c in (" ", "-", "_")
+            ).strip()
+            if len(safe_title) > 30:
+                safe_title = safe_title[:30]
+            zip_filename = f"{safe_title}_附件_{len(attachments)}个.zip"
+
+            # 返回zip文件
+            from fastapi.responses import StreamingResponse
+
+            return StreamingResponse(
+                io.BytesIO(zip_buffer.getvalue()),
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{zip_filename}"
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"生成附件压缩包失败: {e}")
+            raise HTTPException(status_code=500, detail="生成压缩包失败")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量下载附件失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@router.get("/{policy_id}/attachments/download-all")
+async def download_all_attachments(
+    policy_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    下载政策的所有附件（压缩包）
+    """
+    try:
+        # 验证政策存在
+        policy = policy_service.get_policy_by_id(db, policy_id)
+        if not policy:
+            raise HTTPException(status_code=404, detail="政策不存在")
+
+        # 获取所有附件
+        from ..models.attachment import Attachment
+
+        attachments = (
+            db.query(Attachment).filter(Attachment.policy_id == policy_id).all()
+        )
+
+        if not attachments:
+            raise HTTPException(status_code=404, detail="该政策没有附件")
+
+        # 使用批量下载API
+        request_data = {
+            "attachment_ids": [att.id for att in attachments],
+            "format": "zip",
+        }
+
+        return await download_attachments_batch(
+            policy_id, request_data, db, current_user
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载全部附件失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@router.post("/{policy_id}/merge-attachments")
+async def merge_attachments_to_content(
+    policy_id: int,
+    request: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    将指定附件的文本内容合并到政策正文中
+
+    请求体示例:
+    {
+        "attachment_ids": [1, 2, 3],
+        "separator": "\\n\\n--- 附件内容 ---\\n\\n"
+    }
+    """
+    try:
+        attachment_ids = request.get("attachment_ids", [])
+        separator = request.get("separator", "\n\n--- 附件内容 ---\n\n")
+
+        if not attachment_ids:
+            raise HTTPException(status_code=400, detail="必须指定至少一个附件ID")
+
+        if not isinstance(attachment_ids, list) or not all(
+            isinstance(id, int) for id in attachment_ids
+        ):
+            raise HTTPException(status_code=400, detail="attachment_ids必须是整数列表")
+
+        # 调用政策服务进行合并
+        result = policy_service.merge_attachments_to_content(
+            db=db,
+            policy_id=policy_id,
+            attachment_ids=attachment_ids,
+            separator=separator,
+        )
+
+        if result["success"]:
+            return {
+                "message": "附件内容已成功合并到正文",
+                "policy_id": policy_id,
+                "merged_content_length": result.get("merged_content_length", 0),
+                "processed_attachments": result.get("processed_attachments", []),
+                "errors": result.get("errors", []),
+            }
+        else:
+            error_message = result.get("error", "合并附件内容失败")
+            errors = result.get("errors", [])
+            if errors:
+                error_message += f": {'; '.join(errors)}"
+
+            raise HTTPException(status_code=400, detail=error_message)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"合并附件到正文失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@router.get("/attachment-info")
+async def get_attachment_processing_info(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取附件处理相关信息
+
+    返回支持的文件格式和依赖库状态
+    """
+    try:
+        from ..services.attachment_service import AttachmentService
+
+        attachment_service = AttachmentService()
+        supported_formats = attachment_service.get_supported_formats()
+        dependencies = attachment_service.check_dependencies()
+
+        return {
+            "supported_formats": supported_formats,
+            "dependencies": dependencies,
+            "description": "支持的文件格式和必要的依赖库状态",
+        }
+
+    except Exception as e:
+        logger.error(f"获取附件处理信息失败: {e}")
+        raise HTTPException(status_code=500, detail="获取信息失败")

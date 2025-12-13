@@ -208,8 +208,29 @@ import { Setting } from '@element-plus/icons-vue'
 import CronSelector from './CronSelector.vue'
 import { configApi } from '../api/config'
 import type { FormInstance, FormRules } from 'element-plus'
-import type { TaskCreateRequest } from '../types/task'
-import type { ScheduledTaskCreateRequest } from '../types/scheduledTask'
+import type { TaskCreateRequest, Task } from '../types/task'
+import type { ScheduledTask, ScheduledTaskCreateRequest } from '../types/scheduledTask'
+import type { TaskConfig } from '../types/common'
+
+// 任务表单数据类型
+interface TaskFormData {
+  task_type: string
+  task_name: string
+  cron_expression?: string
+  scheduled_task_type?: string
+  is_enabled?: boolean
+  autoStart?: boolean
+  config?: CrawlTaskConfig | BackupTaskConfig
+  [key: string]: unknown // 其他动态字段
+}
+
+interface ScheduledTaskFormData {
+  scheduled_task_type: string
+  task_name: string
+  cron_expression: string
+  config: TaskConfig
+  is_enabled: boolean
+}
 import type { CrawlTaskConfig, BackupTaskConfig } from '../types/common'
 import type { DataSourceConfig } from '../types/common'
 
@@ -218,7 +239,7 @@ interface Props {
   modelValue: boolean
   mode?: 'create' | 'edit'
   taskType?: 'crawl_task' | 'backup_task' | 'scheduled_task'
-  editData?: any
+  editData?: Task | ScheduledTask
   disableTaskTypeSelect?: boolean
 }
 
@@ -231,7 +252,7 @@ const props = withDefaults(defineProps<Props>(), {
 // Emits
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  'submit': [formData: any]
+  'submit': [formData: TaskFormData | ScheduledTaskFormData]
   'cancel': []
 }>()
 
@@ -433,39 +454,48 @@ const loadDataSources = async () => {
   }
 }
 
+// Type guard to check if data is a ScheduledTask
+const isScheduledTask = (data: Task | ScheduledTask): data is ScheduledTask => {
+  return data.task_type === 'scheduled_task'
+}
+
 const loadEditData = () => {
   const data = props.editData
+  if (!data) return
 
   // 基础信息
-  formData.task_type = data.task_type || 'crawl_task'
+  formData.task_type = (data.task_type as 'crawl_task' | 'backup_task' | 'scheduled_task') || 'crawl_task'
   formData.task_name = data.task_name || ''
 
   // 根据任务类型加载配置
-  if (data.task_type === 'scheduled_task') {
+  if (isScheduledTask(data)) {
     formData.cron_expression = data.cron_expression || '0 2 * * *'
     formData.is_enabled = data.is_enabled !== false
-    formData.scheduled_task_type = data.scheduled_task_type || 'crawl_task'
+    formData.scheduled_task_type = (data as any).scheduled_task_type || 'crawl_task'
   } else {
     formData.autoStart = true
   }
 
   // 加载任务配置
-  if (data.config_json || data.config) {
-    const config = data.config_json || data.config
+  const configSource = data.config_json || (data as any).config
+  if (configSource) {
+    const config = configSource as CrawlTaskConfig | BackupTaskConfig
 
     if ((formData.task_type === 'crawl_task') ||
         (formData.task_type === 'scheduled_task' && formData.scheduled_task_type === 'crawl_task')) {
-      crawlConfig.keywords = config.keywords ? config.keywords.join(',') : ''
-      crawlConfig.dateRange = config.date_range ? [config.date_range.start, config.date_range.end] : null
-      crawlConfig.limitPages = config.limit_pages || null
-      crawlConfig.selectedDataSources = config.data_sources ?
-        config.data_sources.map((ds: any) => ds.name) : []
+      const crawlConfigData = config as CrawlTaskConfig
+      crawlConfig.keywords = crawlConfigData.keywords ? crawlConfigData.keywords.join(',') : ''
+      crawlConfig.dateRange = crawlConfigData.date_range ? [crawlConfigData.date_range.start || '', crawlConfigData.date_range.end || ''] : null
+      crawlConfig.limitPages = crawlConfigData.limit_pages || null
+      crawlConfig.selectedDataSources = crawlConfigData.data_sources ?
+        crawlConfigData.data_sources.map((ds: DataSourceConfig) => ds.name) : []
     } else if ((formData.task_type === 'backup_task') ||
                (formData.task_type === 'scheduled_task' && formData.scheduled_task_type === 'backup_task')) {
-      backupConfig.backup_type = config.backup_type || 'full'
-      backupConfig.retention_policy = config.retention_policy || 'keep_30_days'
-      backupConfig.compression = config.compression || 'gzip'
-      backupConfig.include_data = config.include_data || ['database', 'files', 'config']
+      const backupConfigData = config as BackupTaskConfig
+      backupConfig.backup_type = backupConfigData.backup_type || 'full'
+      backupConfig.retention_policy = (backupConfigData as any).retention_policy || 'keep_30_days'
+      backupConfig.compression = (backupConfigData as any).compression || 'gzip'
+      backupConfig.include_data = (backupConfigData as any).include_data || ['database', 'files', 'config']
     }
   }
 }
@@ -540,12 +570,10 @@ const handleSubmit = async () => {
       }
       loading.value = true
       try {
-        let submitData: any
+        let config: CrawlTaskConfig | BackupTaskConfig
 
         if (formData.task_type === 'scheduled_task') {
           // 定时任务
-          let config: CrawlTaskConfig | BackupTaskConfig
-
           if (formData.scheduled_task_type === 'crawl_task') {
             config = {} as CrawlTaskConfig
             if (crawlConfig.keywords.trim()) {
@@ -589,21 +617,16 @@ const handleSubmit = async () => {
             } as BackupTaskConfig
           }
 
-          submitData = {
-            task_type: formData.scheduled_task_type,
+          const scheduledSubmitData: ScheduledTaskFormData = {
+            scheduled_task_type: formData.scheduled_task_type,
             task_name: formData.task_name,
             cron_expression: formData.cron_expression,
             config,
             is_enabled: formData.is_enabled
-          } as ScheduledTaskCreateRequest
-
-          if (props.mode === 'edit') {
-            submitData = { ...submitData, id: props.editData.id }
           }
+          emit('submit', scheduledSubmitData)
         } else {
           // 即时任务
-          let config: CrawlTaskConfig | BackupTaskConfig
-
           if (formData.task_type === 'crawl_task') {
             config = {} as CrawlTaskConfig
             if (crawlConfig.keywords.trim()) {
@@ -646,16 +669,15 @@ const handleSubmit = async () => {
               include_data: backupConfig.include_data
             } as BackupTaskConfig
           }
-
-          submitData = {
-            task_type: formData.task_type,
-            task_name: formData.task_name,
-            config,
-            autoStart: formData.autoStart
-          } as TaskCreateRequest
         }
 
-        emit('submit', submitData)
+        const taskSubmitData: TaskFormData = {
+          task_type: formData.task_type,
+          task_name: formData.task_name,
+          config,
+          autoStart: formData.autoStart
+        }
+        emit('submit', taskSubmitData)
       } catch (error) {
         console.error('提交失败:', error)
         ElMessage.error('提交失败，请重试')
