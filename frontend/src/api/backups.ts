@@ -39,7 +39,7 @@ export const backupsApi = {
   },
 
   // 获取备份详情
-  getBackupById(id: number): Promise<BackupRecord> {
+  getBackupById(id: string): Promise<BackupRecord> {
     return apiClient.get(`/api/backups/${id}`).then((res) => res.data)
   },
 
@@ -49,13 +49,37 @@ export const backupsApi = {
   },
 
   // 恢复备份
-  restoreBackup(id: number, data?: BackupRestoreRequest): Promise<{ message: string }> {
+  restoreBackup(id: string, data?: BackupRestoreRequest): Promise<{ message: string }> {
     return apiClient.post(`/api/backups/${id}/restore`, data || {}).then((res) => res.data)
   },
 
   // 删除备份
-  deleteBackup(id: number): Promise<void> {
+  deleteBackup(id: string): Promise<void> {
     return apiClient.delete(`/api/backups/${id}`).then(() => undefined)
+  },
+
+  // 下载备份文件
+  downloadBackup(id: string): Promise<Blob> {
+    return apiClient
+      .get(`/api/backups/${id}/download`, {
+        responseType: 'blob',
+      })
+      .then((res) => res.data)
+  },
+
+  // 上传备份文件
+  uploadBackup(file: File, backupName?: string): Promise<BackupRecord> {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (backupName) {
+      formData.append('backup_name', backupName)
+    }
+
+    return apiClient.post('/api/backups/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }).then((res) => res.data)
   },
 
   // 清理旧备份

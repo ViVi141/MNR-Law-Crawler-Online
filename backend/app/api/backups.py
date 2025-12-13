@@ -3,7 +3,7 @@
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.orm import Session
 import logging
 
@@ -44,6 +44,45 @@ def create_backup(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建备份失败: {str(e)}",
+        )
+
+
+@router.post("/upload", response_model=BackupRecordResponse)
+async def upload_backup(
+    file: UploadFile = File(..., description="备份文件"),
+    backup_name: Optional[str] = Query(None, description="备份名称"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传备份文件并创建备份记录"""
+    try:
+        # 验证文件类型
+        if not file.filename.lower().endswith(".sql"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="只支持 .sql 格式的备份文件",
+            )
+
+        # 读取文件内容
+        content = await file.read()
+
+        # 创建备份记录
+        backup_record = backup_service.create_backup_from_upload(
+            db=db,
+            file_content=content,
+            filename=file.filename,
+            backup_name=backup_name,
+            user_id=current_user.id,
+        )
+
+        return BackupRecordResponse.model_validate(backup_record)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"上传备份失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"上传备份失败: {str(e)}",
         )
 
 

@@ -9,6 +9,10 @@
               <el-icon><Plus /></el-icon>
               创建备份
             </el-button>
+            <el-button type="success" @click="showUploadDialog = true">
+              <el-icon><Upload /></el-icon>
+              上传备份
+            </el-button>
             <el-button @click="handleCleanup">
               <el-icon><Delete /></el-icon>
               清理旧备份
@@ -50,7 +54,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="file_path" label="文件路径" min-width="300" show-overflow-tooltip />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'completed'"
@@ -59,6 +63,17 @@
               @click="handleRestore(row)"
             >
               恢复
+            </el-button>
+            <el-button
+              v-if="row.status === 'completed'"
+              link
+              type="success"
+              :loading="downloading && downloadingBackup?.id === row.id"
+              :disabled="downloading"
+              @click="handleDownload(row)"
+            >
+              <el-icon v-if="!downloading || downloadingBackup?.id !== row.id"><Download /></el-icon>
+              {{ downloading && downloadingBackup?.id === row.id ? '下载中...' : '下载' }}
             </el-button>
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
@@ -86,29 +101,90 @@
       @submit="handleBackupSubmit"
       @cancel="showCreateDialog = false"
     />
+
+    <!-- 上传备份对话框 -->
+    <el-dialog v-model="showUploadDialog" title="上传备份文件" width="500px">
+      <el-form :model="uploadForm" :rules="uploadRules" ref="uploadFormRef" label-width="100px">
+        <el-form-item label="备份文件" prop="file" required>
+          <el-upload
+            ref="uploadRef"
+            v-model:file-list="fileList"
+            :auto-upload="false"
+            :multiple="false"
+            :limit="1"
+            accept=".sql"
+            :on-change="handleFileChange"
+            :on-remove="handleFileRemove"
+          >
+            <el-button type="primary">选择文件</el-button>
+            <template #tip>
+              <div class="el-upload__tip">
+                请上传 .sql 格式的数据库备份文件
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="备份名称" prop="backupName">
+          <el-input
+            v-model="uploadForm.backupName"
+            placeholder="可选，为备份文件指定名称"
+          />
+          <div class="help-text">
+            留空将使用文件名作为备份名称
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="handleUploadCancel">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="uploading"
+          @click="handleUploadConfirm"
+        >
+          上传
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, Upload, Download } from '@element-plus/icons-vue'
 import TaskCreationForm from '../components/TaskCreationForm.vue'
 import { backupsApi } from '../api/backups'
 import type { BackupRecord } from '../types/backup'
 import type { ApiError } from '../types/common'
+import type { FormInstance, FormRules, UploadFile } from 'element-plus'
 import dayjs from 'dayjs'
 
 const loading = ref(false)
 const creating = ref(false)
+const uploading = ref(false)
+const downloading = ref(false)
 const backups = ref<BackupRecord[]>([])
 const showCreateDialog = ref(false)
+const showUploadDialog = ref(false)
+const downloadingBackup = ref<BackupRecord | null>(null)
 
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0,
 })
+
+const uploadForm = reactive({
+  file: null as File | null,
+  backupName: '',
+})
+
+const fileList = ref<UploadFile[]>([])
+const uploadFormRef = ref<FormInstance>()
+
+const uploadRules: FormRules = {
+  file: [{ required: true, message: '请上传备份文件', trigger: 'change' }],
+}
 
 const formatDateTime = (date: string) => {
   return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
@@ -254,6 +330,136 @@ const handleCleanup = async () => {
   }
 }
 
+// 下载备份文件
+const handleDownload = async (backup: BackupRecord) => {
+  downloadingBackup.value = backup
+  downloading.value = true
+
+  let loadingInstance: ReturnType<typeof ElMessage> | null = null
+
+  try {
+    // 显示加载提示
+    loadingInstance = ElMessage({
+      message: '正在准备下载文件，请稍候...',
+      type: 'info',
+      duration: 0,
+      showClose: false,
+    })
+
+    // 调用下载API
+    const blob = await backupsApi.downloadBackup(backup.id)
+
+    // 关闭加载提示
+    if (loadingInstance) {
+      loadingInstance.close()
+      loadingInstance = null
+    }
+
+    // 检查文件大小
+    const fileSize = blob.size
+    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2)
+
+    if (fileSize === 0) {
+      ElMessage.warning('下载的文件为空，可能备份文件有问题')
+      return
+    }
+
+    // 显示文件大小信息
+    ElMessage({
+      message: `备份文件准备完成，大小: ${fileSizeMB} MB，开始下载...`,
+      type: 'success',
+      duration: 3000,
+    })
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+
+    // 生成文件名
+    const timestamp = dayjs().format('YYYYMMDD_HHmmss')
+    const safeName = (backup.source_name || backup.id).replace(/[<>:"/\\|?*]/g, '_')
+    link.download = `${safeName}_${backup.backup_type}_${timestamp}.sql`
+
+    // 触发下载
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    // 延迟释放URL对象，确保下载开始
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+    }, 100)
+
+    ElMessage.success('备份文件下载成功')
+  } catch (error) {
+    // 关闭加载提示
+    if (loadingInstance) {
+      loadingInstance.close()
+      loadingInstance = null
+    }
+
+    const apiError = error as ApiError
+    const errorMessage = apiError.response?.data?.detail || apiError.message || '下载备份文件失败'
+    ElMessage.error(errorMessage)
+    console.error('下载备份文件失败:', error)
+  } finally {
+    downloading.value = false
+    downloadingBackup.value = null
+  }
+}
+
+// 处理文件选择
+const handleFileChange = (file: UploadFile) => {
+  uploadForm.file = file.raw || null
+}
+
+// 处理文件移除
+const handleFileRemove = () => {
+  uploadForm.file = null
+}
+
+// 取消上传
+const handleUploadCancel = () => {
+  showUploadDialog.value = false
+  uploadForm.file = null
+  uploadForm.backupName = ''
+  fileList.value = []
+}
+
+// 确认上传
+const handleUploadConfirm = async () => {
+  if (!uploadFormRef.value) return
+
+  await uploadFormRef.value.validate(async (valid: boolean) => {
+    if (valid && uploadForm.file) {
+      uploading.value = true
+      try {
+        await backupsApi.uploadBackup(
+          uploadForm.file,
+          uploadForm.backupName || undefined
+        )
+
+        ElMessage.success('备份文件上传成功')
+        showUploadDialog.value = false
+
+        // 清空表单
+        uploadForm.file = null
+        uploadForm.backupName = ''
+        fileList.value = []
+
+        // 刷新备份列表
+        await fetchBackups()
+      } catch (error) {
+        const apiError = error as ApiError
+        ElMessage.error(apiError.response?.data?.detail || '上传备份文件失败')
+      } finally {
+        uploading.value = false
+      }
+    }
+  })
+}
+
 onMounted(() => {
   fetchBackups()
 })
@@ -268,12 +474,21 @@ onMounted(() => {
     height: 100%;
     display: flex;
     flex-direction: column;
-    
+
     .el-card__body {
       flex: 1;
-      overflow-y: auto;
-      min-height: 0;
     }
+  }
+
+  .help-text {
+    font-size: 12px;
+    color: #909399;
+    margin-top: 5px;
+  }
+
+  :deep(.el-upload__tip) {
+    font-size: 12px;
+    color: #909399;
   }
   
   .card-header {

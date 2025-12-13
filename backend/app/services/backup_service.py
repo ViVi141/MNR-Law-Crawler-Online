@@ -238,6 +238,85 @@ class BackupService:
 
             raise
 
+    def create_backup_from_upload(
+        self,
+        db: Session,
+        file_content: bytes,
+        filename: str,
+        backup_name: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> BackupRecord:
+        """从上传的文件创建备份记录
+
+        Args:
+            db: 数据库会话
+            file_content: 文件内容
+            filename: 原始文件名
+            backup_name: 备份名称（可选）
+            user_id: 用户ID
+
+        Returns:
+            BackupRecord对象
+        """
+        try:
+            # 生成备份ID和名称
+            backup_id = str(uuid.uuid4())
+            if not backup_name:
+                # 从文件名提取备份名称
+                backup_name = (
+                    filename.replace(".sql", "")
+                    if filename.endswith(".sql")
+                    else filename
+                )
+
+            # 保存备份文件
+            backup_file = f"{backup_name}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.sql"
+            backup_path = self.backup_dir / backup_file
+
+            # 写入文件内容
+            with open(backup_path, "wb") as f:
+                f.write(file_content)
+
+            # 创建备份记录
+            backup_record = BackupRecord(
+                id=backup_id,
+                backup_type="uploaded",  # 特殊类型表示上传的备份
+                status="completed",  # 上传的文件视为已完成
+                start_time=datetime.now(timezone.utc),
+                end_time=datetime.now(timezone.utc),
+                local_path=str(backup_path),
+                file_size=len(file_content),
+                source_type="upload",
+                source_name=backup_name,
+                source_deleted=False,
+            )
+
+            # 保存到数据库
+            db.add(backup_record)
+            db.commit()
+            db.refresh(backup_record)
+
+            # 上传到S3（如果启用）
+            if self.storage_service.s3_service.is_enabled():
+                try:
+                    s3_key = f"backups/{backup_file}"
+                    if self.storage_service.s3_service.upload_file(
+                        str(backup_path), s3_key
+                    ):
+                        backup_record.s3_key = s3_key
+                        db.commit()
+                        logger.info(f"备份文件已上传到S3: {s3_key}")
+                except Exception as s3_error:
+                    logger.warning(f"上传备份文件到S3失败: {s3_error}")
+
+            logger.info(f"成功创建上传备份: {backup_name} ({len(file_content)} bytes)")
+            return backup_record
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"创建上传备份失败: {e}", exc_info=True)
+            raise
+
     def restore_backup(
         self, backup_record_id: str, target_database: Optional[str] = None
     ) -> Dict[str, Any]:
