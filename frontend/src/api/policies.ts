@@ -44,11 +44,21 @@ export const policiesApi = {
     return apiClient.get('/api/policies/', { params: queryParams }).then((res) => {
       const data = res.data
       // 转换响应格式：后端返回 skip/limit，前端期望 page/page_size
-      // 同时处理日期字段：后端返回 pub_date，前端期望 publish_date
+      // 字段映射转换：将后端字段名转换为前端字段名
       const items = (data.items || []).map((item: Partial<Policy> & Record<string, string | number | boolean | null | undefined>) => ({
         ...item,
-        publish_date: item.publish_date || (item.pub_date ? String(item.pub_date) : null),
-        law_type: item.level || item.law_type, // 兼容字段名
+        // 基本字段映射
+        publishDate: item.publish_date || item.pub_date || null, // 发布日期
+        effectiveDate: item.effective_date || null, // 生效日期
+        docNumber: item.doc_number || null, // 文号
+        lawLevel: item.level || item.law_type || null, // 效力级别
+        sourceName: item.source_name || null, // 数据源名称
+        sourceUrl: item.source_url || item.source || null, // 数据源URL
+        createdAt: item.created_at || null, // 创建时间
+        updatedAt: item.updated_at || null, // 更新时间
+        // 保留原始字段以兼容性
+        publish_date: item.publish_date || item.pub_date || null,
+        law_type: item.level || item.law_type || null,
       }))
       
       if (data.skip !== undefined && data.limit !== undefined) {

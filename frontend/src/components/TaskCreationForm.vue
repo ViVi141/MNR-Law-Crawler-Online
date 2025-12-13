@@ -297,6 +297,13 @@ const formRules = computed((): FormRules => ({
         if ((taskType === 'crawl_task') ||
             (taskType === 'scheduled_task' && scheduledTaskType === 'crawl_task')) {
           if (!value || value.length === 0) {
+            console.warn('表单验证失败: 数据源未选择', {
+              taskType,
+              scheduledTaskType,
+              value,
+              availableDataSourcesCount: availableDataSources.value.length,
+              crawlConfigSelected: crawlConfig.selectedDataSources
+            })
             callback(new Error('请至少选择一个数据源'))
             return
           }
@@ -429,7 +436,16 @@ const loadDataSources = async () => {
         enabled: false,
       },
     ]
-    crawlConfig.selectedDataSources = ['政府信息公开平台']
+
+    // 默认选择启用的数据源
+    const enabledSource = availableDataSources.value.find(ds => ds.enabled)
+    if (enabledSource) {
+      crawlConfig.selectedDataSources = [enabledSource.name]
+      console.log('默认选择启用数据源:', enabledSource.name)
+    } else if (availableDataSources.value.length > 0) {
+      crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
+      console.log('默认选择第一个数据源:', availableDataSources.value[0].name)
+    }
   }
 }
 
@@ -543,12 +559,24 @@ const handleSubmit = async () => {
               config.limit_pages = crawlConfig.limitPages
             }
             if (crawlConfig.selectedDataSources.length > 0) {
-              config.data_sources = availableDataSources.value
+              const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
+
+              console.log('定时任务数据源过滤结果:', {
+                selected: crawlConfig.selectedDataSources,
+                available: availableDataSources.value.map(s => s.name),
+                filtered: filteredSources.map(s => s.name)
+              })
+
+              config.data_sources = filteredSources
                 .map((source: DataSourceConfig) => ({
                   ...source,
                   enabled: true
                 }))
+
+              console.log('定时任务最终数据源配置:', config.data_sources)
+            } else {
+              console.warn('警告: 定时任务没有选择数据源')
             }
           } else {
             config = {
@@ -589,12 +617,24 @@ const handleSubmit = async () => {
               config.limit_pages = crawlConfig.limitPages
             }
             if (crawlConfig.selectedDataSources.length > 0) {
-              config.data_sources = availableDataSources.value
+              const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
+
+              console.log('即时任务数据源过滤结果:', {
+                selected: crawlConfig.selectedDataSources,
+                available: availableDataSources.value.map(s => s.name),
+                filtered: filteredSources.map(s => s.name)
+              })
+
+              config.data_sources = filteredSources
                 .map((source: DataSourceConfig) => ({
                   ...source,
                   enabled: true
                 }))
+
+              console.log('即时任务最终数据源配置:', config.data_sources)
+            } else {
+              console.warn('警告: 即时任务没有选择数据源')
             }
           } else {
             config = {
@@ -664,6 +704,35 @@ onMounted(() => {
     margin-left: 10px;
     font-size: 12px;
     color: #909399;
+  }
+
+  // 修复选择框过小的问题
+  :deep(.el-select) {
+    min-width: 200px;
+
+    // 确保下拉选项能正常显示
+    .el-select__tags {
+      max-width: 160px;
+    }
+  }
+
+  // 任务类型选择框
+  :deep(.el-form-item[prop="task_type"] .el-select),
+  :deep(.el-form-item[prop="scheduled_task_type"] .el-select) {
+    min-width: 220px;
+  }
+
+  // 数据源选择框
+  :deep(.el-form-item[prop="crawlConfig.selectedDataSources"]) {
+    :deep(.el-checkbox-group) {
+      max-height: 200px;
+      overflow-y: auto;
+
+      .el-checkbox {
+        display: block;
+        margin-bottom: 8px;
+      }
+    }
   }
 }
 

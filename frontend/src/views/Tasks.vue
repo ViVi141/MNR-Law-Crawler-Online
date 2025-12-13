@@ -734,9 +734,25 @@ onUnmounted(() => {
     padding: 20px;
     background-color: #f5f7fa;
     border-radius: 4px;
-    
+
     :deep(.el-form-item) {
       margin-bottom: 10px;
+    }
+
+    // 修复筛选框过小的问题
+    :deep(.el-select) {
+      min-width: 160px;
+
+      // 确保下拉选项也能正常显示
+      .el-select__tags {
+        max-width: 120px;
+      }
+    }
+
+    // 任务类型和状态筛选框特殊处理
+    :deep(.el-form-item:nth-child(1) .el-select),
+    :deep(.el-form-item:nth-child(2) .el-select) {
+      min-width: 180px;
     }
   }
 

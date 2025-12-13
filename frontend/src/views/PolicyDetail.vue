@@ -30,16 +30,17 @@
           <el-descriptions-item label="分类">{{ policy.category }}</el-descriptions-item>
           <el-descriptions-item label="发布机构">{{ policy.publisher }}</el-descriptions-item>
           <el-descriptions-item label="发布日期">
-            {{ formatDate(policy.publish_date) }}
+            {{ formatDate(policy.publishDate || policy.publish_date || '') }}
           </el-descriptions-item>
           <el-descriptions-item label="生效日期">
-            {{ policy.effective_date ? formatDate(policy.effective_date) : '-' }}
+            {{ formatDate(policy.effectiveDate || policy.effective_date || '') }}
           </el-descriptions-item>
-          <el-descriptions-item label="文号">{{ policy.doc_number || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="效力级别">{{ policy.law_type || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="文号">{{ policy.docNumber || policy.doc_number || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="效力级别">{{ policy.lawLevel || policy.law_type || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="有效性">{{ policy.validity || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ policy.status || '-' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">
-            {{ formatDateTime(policy.created_at) }}
+            {{ formatDateTime(policy.createdAt || policy.created_at || '') }}
           </el-descriptions-item>
         </el-descriptions>
 

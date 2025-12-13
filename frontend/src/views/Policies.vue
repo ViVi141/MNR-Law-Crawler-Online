@@ -121,19 +121,35 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="publisher" label="发布机构" width="150" show-overflow-tooltip />
-        <el-table-column prop="doc_number" label="文号" width="180" show-overflow-tooltip>
+        <el-table-column prop="publisher" label="发布机构" width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.doc_number">{{ row.doc_number }}</span>
+            <span v-if="row.publisher">{{ row.publisher }}</span>
             <span v-else style="color: #c0c4cc;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="publish_date" label="发布日期" width="120">
+        <el-table-column prop="docNumber" label="文号" width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ formatDate(row.publish_date) }}
+            <span v-if="row.docNumber">{{ row.docNumber }}</span>
+            <span v-else style="color: #c0c4cc;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="law_type" label="效力级别" width="140" show-overflow-tooltip />
+        <el-table-column prop="publishDate" label="发布日期" width="120">
+          <template #default="{ row }">
+            {{ formatDate(row.publishDate || row.publish_date) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="lawLevel" label="效力级别" width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.lawLevel">{{ row.lawLevel }}</span>
+            <span v-else style="color: #c0c4cc;">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="validity" label="有效性" width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="row.validity" size="small" type="info">{{ row.validity }}</el-tag>
+            <span v-else style="color: #c0c4cc;">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="validity" label="有效性" width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.validity" size="small" type="info">{{ row.validity }}</el-tag>
