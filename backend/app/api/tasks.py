@@ -283,9 +283,7 @@ def stop_task(
     try:
         success = task_service.stop_task(db, task_id)
         if not success:
-            raise HTTPException(
-                status_code=400, detail="任务无法停止（可能不在运行状态）"
-            )
+            raise HTTPException(status_code=400, detail="任务无法停止（可能不在运行状态）")
 
         # 获取更新后的任务对象
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -310,9 +308,7 @@ def pause_task(
     try:
         success = task_service.pause_task(db, task_id)
         if not success:
-            raise HTTPException(
-                status_code=400, detail="任务无法暂停（可能不在运行状态）"
-            )
+            raise HTTPException(status_code=400, detail="任务无法暂停（可能不在运行状态）")
 
         # 获取更新后的任务对象
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -337,9 +333,7 @@ def resume_task(
     try:
         success = task_service.resume_task(db, task_id)
         if not success:
-            raise HTTPException(
-                status_code=400, detail="任务无法恢复（可能不在暂停状态）"
-            )
+            raise HTTPException(status_code=400, detail="任务无法恢复（可能不在暂停状态）")
 
         # 获取更新后的任务对象
         task = db.query(Task).filter(Task.id == task_id).first()

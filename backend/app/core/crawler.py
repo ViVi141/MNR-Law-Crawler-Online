@@ -26,10 +26,6 @@ logger = logging.getLogger(__name__)
 # 文件编号锁（类级别，所有实例共享）
 _file_number_lock = threading.Lock()
 
-# 文件编号计数器（模块级别，所有实例共享）
-_file_counter = 0
-_markdown_counter = 0
-
 # 自然资源部分类配置
 MNR_CATEGORIES = {
     "自然资源调查监测": {"code": "1318", "name": "自然资源调查监测"},
@@ -1056,10 +1052,6 @@ class PolicyCrawler:
                                 if numbers:
                                     _markdown_counter = max(numbers)
 
-            # 递增计数器并返回
-            _markdown_counter += 1
-            return _markdown_counter
-
     def _get_next_file_number(self) -> int:
         """获取下一个附件文件编号（线程安全）"""
         global _file_counter
@@ -1078,10 +1070,6 @@ class PolicyCrawler:
                                 numbers.append(int(parts[0]))
                                 if numbers:
                                     _file_counter = max(numbers)
-
-            # 递增计数器并返回
-            _file_counter += 1
-            return _file_counter
 
     def _download_attachments(
         self,
