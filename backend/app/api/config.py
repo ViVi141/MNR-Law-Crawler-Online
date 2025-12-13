@@ -55,6 +55,18 @@ def update_feature_flag(
     try:
         config_service.set_feature_flag(db, flag_name, enabled)
         flags = config_service.get_feature_flags(db)
+
+        # 如果是邮件功能开关，通知邮件服务重新加载配置
+        if flag_name == "email_enabled":
+            try:
+                from ..services.email_service import get_email_service
+
+                email_service = get_email_service()
+                email_service.reload_config(db)
+                logger.info("邮件服务配置已实时更新")
+            except Exception as e:
+                logger.warning(f"通知邮件服务重新加载配置失败: {e}")
+
         return FeatureFlagsResponse(**flags)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
