@@ -134,9 +134,9 @@ const formatFileSize = (bytes: number) => {
 }
 
 const formatContent = (content: string) => {
-  // HTML内容格式化：处理换行和空格，避免奇怪换行
+  // HTML内容格式化：智能处理换行和分段，修复常见的分段错误
   if (!content) return ''
-  
+
   // 先转义HTML特殊字符
   let formatted = content
     .replace(/&/g, '&amp;')
@@ -144,18 +144,37 @@ const formatContent = (content: string) => {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-  
-  // 修复被错误拆分的数字和括号（如 \n2022\n）
-  formatted = formatted.replace(/\n+(\d{4})\s*\n+/g, '$1')
-  formatted = formatted.replace(/\n+(\d+[号条款项])/g, '$1')
-  
-  // 将换行符转换为<br/>，但多个连续换行只保留一个
-  formatted = formatted.replace(/\n{3,}/g, '\n\n')
+
+  // 1. 修复被错误拆分的年份（如 \n2022\n、\n2022年\n）
+  formatted = formatted.replace(/\n+(\d{4})(年?)\s*\n+/g, '$1$2')
+
+  // 2. 修复被错误拆分的序号和条款（如 \n第1条\n、\n第一款\n）
+  formatted = formatted.replace(/\n+(第?[一二三四五六七八九十\d]+[号条款项节章款])(?:\s*\n+)?/g, '$1')
+
+  // 3. 修复被错误拆分的括号内容（如 \n(1)\n、\n（一）\n）
+  formatted = formatted.replace(/\n+(\([一二三四五六七八九十\d]+\))\s*\n+/g, '$1')
+  formatted = formatted.replace(/\n+(（[一二三四五六七八九十\d]+）)\s*\n+/g, '$1')
+
+  // 4. 修复标点符号前的错误换行（如 \n。\n、\n，\n）
+  formatted = formatted.replace(/\n+([。？！，、；：])\s*\n+/g, '$1')
+
+  // 5. 修复引号和书名号前的错误换行（如 \n《\n、\n》\n）
+  formatted = formatted.replace(/\n+([\'"《》【】「」『』])\s*\n+/g, '$1')
+
+  // 6. 清理多余的连续换行符
+  formatted = formatted.replace(/\n{4,}/g, '\n\n\n')
+
+  // 7. 将换行符转换为HTML换行，但保留段落结构
+  // 三个连续换行符视为段落分隔
+  formatted = formatted.replace(/\n{3}/g, '\n\n')
+  // 两个连续换行符保留为双换行
+  formatted = formatted.replace(/\n{2}/g, '\n\n')
+  // 单个换行符转换为<br/>
   formatted = formatted.replace(/\n/g, '<br/>')
-  
-  // 合并多个连续的<br/>标签（最多保留两个）
-  formatted = formatted.replace(/(<br\/>){3,}/g, '<br/><br/>')
-  
+
+  // 8. 清理多余的连续<br/>标签（最多保留两个）
+  formatted = formatted.replace(/(<br\/>\s*){3,}/g, '<br/><br/>')
+
   return formatted
 }
 

@@ -404,18 +404,9 @@ class APIClient:
                     # 优先提取 Custom_UnionStyle 中的内容（这是真正的正文）
                     custom_style = content_div.find("div", class_="Custom_UnionStyle")
                     if custom_style:
-                        # 不再移除第一个段落，因为可能是正文的一部分，避免缺字
-                        # 使用strip=False保留原始文本结构，避免丢失内容
-                        content = custom_style.get_text(separator="\n", strip=False)
-                        # 手动清理每行的首尾空白，但保留换行结构
-                        lines = content.split("\n")
-                        content = "\n".join(
-                            [
-                                line.strip()
-                                for line in lines
-                                if line.strip() or line == ""
-                            ]
-                        )
+                        # Custom_UnionStyle 包含了完整的正文内容
+                        # 需要特殊处理 span 标签内的内容
+                        content = self._extract_custom_union_style_content(custom_style)
                     else:
                         # 否则使用整个content_div的内容
                         # 使用strip=False保留原始文本结构，避免丢失内容
@@ -459,6 +450,73 @@ class APIClient:
                     return {"content": "", "attachments": []}
 
         return {"content": "", "attachments": []}
+
+    def _extract_custom_union_style_content(
+        self, custom_style_div: BeautifulSoup
+    ) -> str:
+        """专门处理 Custom_UnionStyle 标签中的内容
+
+        Custom_UnionStyle 是政府信息公开平台正文的专用容器，
+        内部包含复杂的 span 和 p 标签结构，需要智能提取。
+
+        Args:
+            custom_style_div: Custom_UnionStyle div 元素
+
+        Returns:
+            提取并格式化的正文内容
+        """
+        if not custom_style_div:
+            return ""
+
+        paragraphs = []
+
+        # 遍历所有 p 标签（每个 p 通常是一个段落）
+        for p in custom_style_div.find_all("p", recursive=True):
+            # 获取段落文本
+            text = p.get_text(strip=True)
+            if not text:
+                continue
+
+            # 检查是否是空段落或只包含空白字符
+            if text.strip() in ["", "　", " "]:
+                continue
+
+            # 清理文本中的多余空格
+            text = " ".join(text.split())  # 将多个连续空格合并为单个空格
+
+            paragraphs.append(text)
+
+        # 如果没有找到 p 标签，尝试直接提取所有文本
+        if not paragraphs:
+            # 直接提取所有文本，按换行分割
+            all_text = custom_style_div.get_text(separator="\n", strip=True)
+            raw_lines = all_text.split("\n")
+
+            for line in raw_lines:
+                line = line.strip()
+                if line and line not in ["", "　", " "]:
+                    # 清理多余空格
+                    line = " ".join(line.split())
+                    paragraphs.append(line)
+
+        # 合并段落，段落之间用换行符分隔
+        content = "\n\n".join(paragraphs)
+
+        # 最终清理
+        import re
+
+        # 移除连续的换行符（保留最多两个）
+        content = re.sub(r"\n{3,}", "\n\n", content)
+        # 移除段落内的多余空格
+        lines = content.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            # 移除行首尾空白，但保留段落结构
+            cleaned_line = line.strip()
+            if cleaned_line:
+                cleaned_lines.append(cleaned_line)
+
+        return "\n\n".join(cleaned_lines)
 
     def _extract_metadata(self, soup: BeautifulSoup) -> Dict[str, str]:
         """从详情页提取元信息（针对自然资源部网站的特定结构，支持 gi.mnr.gov.cn 和 f.mnr.gov.cn）

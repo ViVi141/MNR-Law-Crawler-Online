@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # 文件编号锁（类级别，所有实例共享）
 _file_number_lock = threading.Lock()
 
+# 文件编号计数器（全局变量，线程安全）
+_markdown_counter = 0
+_file_counter = 0
+
 # 自然资源部分类配置
 MNR_CATEGORIES = {
     "自然资源调查监测": {"code": "1318", "name": "自然资源调查监测"},
@@ -98,7 +102,25 @@ class PolicyCrawler:
             setattr(self.progress, key, value)
 
         if self.progress_callback:
-            self.progress_callback(self.progress)
+            # 生成进度消息字符串
+            if (
+                hasattr(self.progress, "current_policy_title")
+                and self.progress.current_policy_title
+            ):
+                message = f"正在处理: {self.progress.current_policy_title}"
+            else:
+                message = f"进度: {getattr(self.progress, 'completed_count', 0)}/{getattr(self.progress, 'total_count', 0)}"
+
+            # 调用回调函数，传递字符串消息
+            try:
+                self.progress_callback(message)
+            except Exception:
+                # 如果回调函数不接受字符串，尝试传递对象（向后兼容）
+                try:
+                    self.progress_callback(self.progress)
+                except Exception:
+                    # 静默失败，避免中断爬虫流程
+                    pass
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """解析日期字符串为datetime对象"""
@@ -646,7 +668,7 @@ class PolicyCrawler:
 
     def crawl_single_policy(
         self, policy: Policy, callback: Optional[Callable] = None, retry_count: int = 0
-    ) -> bool:
+    ) -> Optional[Policy]:
         """爬取单个政策（支持自动重试）
 
         Args:
@@ -655,7 +677,7 @@ class PolicyCrawler:
             retry_count: 当前重试次数（内部使用）
 
         Returns:
-            是否成功
+            爬取成功的政策对象，失败时返回None
         """
         self._update_progress(
             current_policy_id=policy.id, current_policy_title=policy.title
@@ -792,7 +814,7 @@ class PolicyCrawler:
             if callback:
                 callback("   ✓ 政策爬取完成")
             logger.debug("政策爬取完成")
-            return True
+            return policy
 
         except Exception as e:
             # 记录失败信息到专门的失败日志
@@ -813,7 +835,10 @@ class PolicyCrawler:
                 )
 
                 time.sleep(retry_delay)
-                return self.crawl_single_policy(policy, callback, retry_count + 1)
+                retry_result = self.crawl_single_policy(
+                    policy, callback, retry_count + 1
+                )
+                return retry_result
             else:
                 # 重试次数已用完，记录失败
                 logger.error(
@@ -828,7 +853,7 @@ class PolicyCrawler:
                     f"政策爬取失败 (已重试 {retry_count} 次): {policy.title} - {error_msg}",
                     exc_info=True,
                 )
-                return False
+                return None
 
     def _save_json(self, policy: Policy):
         """保存JSON数据"""
@@ -1049,8 +1074,12 @@ class PolicyCrawler:
                             parts = filename.split("_", 1)
                             if parts and len(parts) >= 2 and parts[0].isdigit():
                                 numbers.append(int(parts[0]))
-                                if numbers:
-                                    _markdown_counter = max(numbers)
+                        if numbers:
+                            _markdown_counter = max(numbers)
+
+            # 递增计数器并返回新值
+            _markdown_counter += 1
+            return _markdown_counter
 
     def _get_next_file_number(self) -> int:
         """获取下一个附件文件编号（线程安全）"""
@@ -1068,8 +1097,12 @@ class PolicyCrawler:
                             parts = filename.split("_", 1)
                             if parts and len(parts) >= 2 and parts[0].isdigit():
                                 numbers.append(int(parts[0]))
-                                if numbers:
-                                    _file_counter = max(numbers)
+                        if numbers:
+                            _file_counter = max(numbers)
+
+            # 递增计数器并返回新值
+            _file_counter += 1
+            return _file_counter
 
     def _download_attachments(
         self,
@@ -1289,9 +1322,9 @@ class PolicyCrawler:
             self.progress.current_policy_title = policy.title
             self._update_progress()
 
-            success = self.crawl_single_policy(policy, callback)
+            result_policy = self.crawl_single_policy(policy, callback)
 
-            if success:
+            if result_policy:
                 self.progress.completed_count += 1
                 self.progress.completed_policies.append(policy.id)
             else:
@@ -1479,9 +1512,9 @@ class PolicyCrawler:
                 callback(f"重试政策: {policy.title}")
                 callback(f"原失败原因: {original_reason}")
 
-            success = self.crawl_single_policy(policy, callback)
+            result_policy = self.crawl_single_policy(policy, callback)
 
-            if success:
+            if result_policy:
                 self.progress.completed_count += 1
                 self.progress.completed_policies.append(policy.id)
                 if callback:
