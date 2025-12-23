@@ -44,6 +44,7 @@ RUN set -e; \
 
 # 安装构建依赖（添加重试机制和超时设置）
 RUN set -e; \
+    export DEBIAN_FRONTEND=noninteractive; \
     echo "正在更新软件包列表..."; \
     apt-get update --fix-missing || (sleep 5 && apt-get update --fix-missing); \
     echo "正在安装构建依赖..."; \
@@ -97,7 +98,8 @@ RUN set -e; \
     echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security $DEBIAN_VERSION-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list || true
 
 # 安装运行时依赖（包括 LibreOffice 用于 DOC 转 DOCX）
-RUN apt-get update --fix-missing && \
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update --fix-missing && \
     apt-get install -y --no-install-recommends \
     postgresql-client \
     curl \

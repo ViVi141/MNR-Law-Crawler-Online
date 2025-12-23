@@ -600,11 +600,12 @@ const startProgressStreaming = (taskId: number) => {
       if (data.type !== 'heartbeat') {
         fetchTasks()
       }
-    } catch (error) {
+    } catch {
+      // 忽略解析错误
     }
   }
 
-  progressEventSource.onerror = (error) => {
+  progressEventSource.onerror = () => {
     // 连接出错时，回退到轮询模式
     if (currentTask.value?.status === 'running') {
       startTaskDetailRefresh(taskId)
