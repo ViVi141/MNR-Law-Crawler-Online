@@ -4,7 +4,7 @@
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ScheduledTaskCreate(BaseModel):
@@ -17,6 +17,28 @@ class ScheduledTaskCreate(BaseModel):
     )
     config: Dict[str, Any] = Field(..., description="任务配置")
     is_enabled: bool = Field(default=False, description="是否启用")
+
+    @model_validator(mode="after")
+    def validate_config(self) -> "ScheduledTaskCreate":
+        """验证配置字段"""
+        # 如果 task_type 是 crawl_task，验证 data_sources
+        if self.task_type == "crawl_task":
+            data_sources = self.config.get("data_sources", [])
+            if not data_sources or len(data_sources) == 0:
+                raise ValueError("创建爬取任务时必须至少指定一个数据源")
+            # 验证数据源配置完整性
+            for idx, ds in enumerate(data_sources):
+                if not isinstance(ds, dict):
+                    raise ValueError(f"数据源配置格式错误（索引 {idx}）: {ds}")
+                required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                missing_fields = [
+                    f for f in required_fields if f not in ds or not ds.get(f)
+                ]
+                if missing_fields:
+                    raise ValueError(
+                        f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
+                    )
+        return self
 
     class Config:
         json_schema_extra = {
@@ -37,6 +59,28 @@ class ScheduledTaskUpdate(BaseModel):
     cron_expression: Optional[str] = Field(None, description="Cron表达式")
     config: Optional[Dict[str, Any]] = Field(None, description="任务配置")
     is_enabled: Optional[bool] = Field(None, description="是否启用")
+
+    @model_validator(mode="after")
+    def validate_config(self) -> "ScheduledTaskUpdate":
+        """验证配置字段（如果提供了config）"""
+        # 如果提供了config，验证data_sources（需要从数据库获取task_type来验证）
+        # 注意：在更新时，我们需要从数据库获取task_type，所以这里的验证会在service层进行
+        # 这里只做基本的格式验证
+        if self.config is not None:
+            data_sources = self.config.get("data_sources", [])
+            if data_sources:  # 如果提供了data_sources，验证其格式
+                for idx, ds in enumerate(data_sources):
+                    if not isinstance(ds, dict):
+                        raise ValueError(f"数据源配置格式错误（索引 {idx}）: {ds}")
+                    required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                    missing_fields = [
+                        f for f in required_fields if f not in ds or not ds.get(f)
+                    ]
+                    if missing_fields:
+                        raise ValueError(
+                            f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
+                        )
+        return self
 
 
 class ScheduledTaskRunResponse(BaseModel):

@@ -67,9 +67,20 @@ export const scheduledTasksApi = {
 
   // 启用/禁用定时任务
   toggleScheduledTask(id: number, isEnabled: boolean): Promise<ScheduledTask> {
-    return apiClient
-      .put(`/api/scheduled-tasks/${id}`, { is_enabled: isEnabled })
-      .then((res) => res.data)
+    if (isEnabled) {
+      return apiClient
+        .put(`/api/scheduled-tasks/${id}/enable`)
+        .then((res) => res.data)
+    } else {
+      return apiClient
+        .put(`/api/scheduled-tasks/${id}/disable`)
+        .then((res) => res.data)
+    }
+  },
+
+  // 获取调度器状态
+  getSchedulerStatus(): Promise<{ enabled: boolean; running: boolean; message: string }> {
+    return apiClient.get('/api/scheduled-tasks/status').then((res) => res.data)
   },
 }
 

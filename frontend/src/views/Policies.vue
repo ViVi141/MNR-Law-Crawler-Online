@@ -464,7 +464,6 @@ const loadSourceNames = async () => {
   try {
     availableSourceNames.value = await policiesApi.getSourceNames()
   } catch (error) {
-    console.error('获取数据源列表失败:', error)
   }
 }
 
@@ -472,7 +471,6 @@ const loadCategories = async (sourceName?: string) => {
   try {
     availableCategories.value = await policiesApi.getCategories(sourceName)
   } catch (error) {
-    console.error('获取分类列表失败:', error)
     availableCategories.value = []
   }
 }

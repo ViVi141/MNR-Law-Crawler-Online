@@ -410,7 +410,6 @@ const handleDownload = async (backup: BackupRecord) => {
     const apiError = error as ApiError
     const errorMessage = apiError.response?.data?.detail || apiError.message || '下载备份文件失败'
     ElMessage.error(errorMessage)
-    console.error('下载备份文件失败:', error)
   } finally {
     downloading.value = false
     downloadingBackup.value = null

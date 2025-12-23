@@ -433,10 +433,8 @@ const loadDataSources = async () => {
       } else {
         crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
       }
-      console.log('创建模式下设置默认数据源:', crawlConfig.selectedDataSources)
     }
   } catch (error) {
-    console.warn('获取数据源列表失败:', error)
     // 使用默认数据源
     availableDataSources.value = [
       {
@@ -461,10 +459,8 @@ const loadDataSources = async () => {
     const enabledSource = availableDataSources.value.find(ds => ds.enabled)
     if (enabledSource) {
       crawlConfig.selectedDataSources = [enabledSource.name]
-      console.log('默认选择启用数据源:', enabledSource.name)
     } else if (availableDataSources.value.length > 0) {
       crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
-      console.log('默认选择第一个数据源:', availableDataSources.value[0].name)
     }
   }
 }
@@ -547,8 +543,6 @@ const resetForm = () => {
     } else {
       crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
     }
-
-    console.log('表单重置时设置默认数据源:', crawlConfig.selectedDataSources)
   } else {
     // 如果没有可用数据源，清空选择
     crawlConfig.selectedDataSources = []
@@ -567,6 +561,11 @@ const handleCancel = () => {
 
 const handleSubmit = async () => {
   if (!formRef.value) return
+  
+  // 防止重复提交
+  if (loading.value) {
+    return
+  }
 
   // 首先进行表单验证
   await formRef.value.validate(async (valid: boolean) => {
@@ -607,21 +606,25 @@ const handleSubmit = async () => {
               const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
 
-              console.log('定时任务数据源过滤结果:', {
-                selected: crawlConfig.selectedDataSources,
-                available: availableDataSources.value.map(s => s.name),
-                filtered: filteredSources.map(s => s.name)
-              })
-
+              // 确保数据源包含所有必需字段
               config.data_sources = filteredSources
-                .map((source: DataSourceConfig) => ({
-                  ...source,
-                  enabled: true
-                }))
-
-              console.log('定时任务最终数据源配置:', config.data_sources)
+                .map((source: DataSourceConfig) => {
+                  const dataSource = {
+                    name: source.name,
+                    base_url: source.base_url,
+                    search_api: source.search_api,
+                    ajax_api: source.ajax_api,
+                    channel_id: source.channel_id || '',
+                    enabled: true
+                  }
+                  // 验证必需字段
+                  if (!dataSource.name || !dataSource.base_url || !dataSource.search_api || !dataSource.ajax_api) {
+                    throw new Error(`数据源 "${dataSource.name}" 缺少必需字段`)
+                  }
+                  return dataSource
+                })
             } else {
-              console.warn('警告: 定时任务没有选择数据源')
+              throw new Error('创建爬取任务时必须至少选择一个数据源')
             }
           } else {
             config = {
@@ -660,21 +663,12 @@ const handleSubmit = async () => {
               const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
 
-              console.log('即时任务数据源过滤结果:', {
-                selected: crawlConfig.selectedDataSources,
-                available: availableDataSources.value.map(s => s.name),
-                filtered: filteredSources.map(s => s.name)
-              })
-
               config.data_sources = filteredSources
                 .map((source: DataSourceConfig) => ({
                   ...source,
                   enabled: true
                 }))
-
-              console.log('即时任务最终数据源配置:', config.data_sources)
             } else {
-              console.warn('警告: 即时任务没有选择数据源')
             }
           } else {
             config = {
@@ -694,7 +688,6 @@ const handleSubmit = async () => {
         }
         emit('submit', taskSubmitData)
       } catch (error) {
-        console.error('提交失败:', error)
         ElMessage.error('提交失败，请重试')
       } finally {
         loading.value = false
@@ -707,10 +700,8 @@ const handleSubmit = async () => {
 watch(() => formData.task_type, handleTaskTypeChange)
 watch(() => formData.scheduled_task_type, handleScheduledTaskTypeChange)
 
-// 监听数据源选择变化，用于调试
-watch(() => crawlConfig.selectedDataSources, (newVal) => {
-  console.log('数据源选择变化:', newVal)
-}, { deep: true })
+// 监听数据源选择变化
+watch(() => crawlConfig.selectedDataSources, () => {}, { deep: true })
 
 onMounted(() => {
   // 组件挂载时的初始化逻辑

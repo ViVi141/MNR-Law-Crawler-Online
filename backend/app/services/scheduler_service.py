@@ -838,6 +838,121 @@ class SchedulerService:
 
         return runs, total
 
+    def update_scheduled_task(
+        self,
+        db: Session,
+        scheduled_task_id: int,
+        task_name: Optional[str] = None,
+        cron_expression: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        is_enabled: Optional[bool] = None,
+    ) -> ScheduledTask:
+        """更新定时任务"""
+        scheduled_task = (
+            db.query(ScheduledTask)
+            .filter(ScheduledTask.id == scheduled_task_id)
+            .first()
+        )
+
+        if not scheduled_task:
+            raise ValueError(f"定时任务不存在: {scheduled_task_id}")
+
+        # 如果更新了任务名称，检查是否与其他任务重复
+        if task_name and task_name != scheduled_task.task_name:
+            existing = (
+                db.query(ScheduledTask)
+                .filter(ScheduledTask.task_name == task_name)
+                .filter(ScheduledTask.id != scheduled_task_id)
+                .first()
+            )
+            if existing:
+                raise ValueError(f"定时任务名称已存在: {task_name}")
+
+        # 如果更新了Cron表达式，验证并计算下次运行时间
+        if cron_expression and cron_expression != scheduled_task.cron_expression:
+            try:
+                parts = cron_expression.strip().split()
+                if len(parts) != 5:
+                    raise ValueError("Cron表达式必须包含5个字段：分 时 日 月 周")
+                trigger = CronTrigger(
+                    minute=parts[0],
+                    hour=parts[1],
+                    day=parts[2],
+                    month=parts[3],
+                    day_of_week=parts[4],
+                )
+                # 计算下次运行时间
+                next_run_time = trigger.get_next_fire_time(
+                    None, datetime.now(timezone.utc)
+                )
+                scheduled_task.cron_expression = cron_expression
+                scheduled_task.next_run_time = next_run_time
+            except Exception as e:
+                raise ValueError(f"无效的Cron表达式: {cron_expression}, 错误: {e}")
+
+        # 更新其他字段
+        if task_name:
+            scheduled_task.task_name = task_name
+        if config is not None:
+            # 如果更新了config，验证data_sources（对于crawl_task类型）
+            if scheduled_task.task_type == "crawl_task":
+                data_sources = config.get("data_sources", [])
+                if not data_sources or len(data_sources) == 0:
+                    raise ValueError("更新爬取任务时必须至少指定一个数据源")
+                # 验证数据源配置完整性
+                for idx, ds in enumerate(data_sources):
+                    if not isinstance(ds, dict):
+                        raise ValueError(f"数据源配置格式错误（索引 {idx}）: {ds}")
+                    required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                    missing_fields = [
+                        f for f in required_fields if f not in ds or not ds.get(f)
+                    ]
+                    if missing_fields:
+                        raise ValueError(
+                            f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
+                        )
+            scheduled_task.config_json = config
+        if is_enabled is not None:
+            # 处理启用/禁用状态变更
+            old_enabled = scheduled_task.is_enabled
+            scheduled_task.is_enabled = is_enabled
+
+            # 如果状态发生变化，需要从调度器添加或移除
+            if old_enabled != is_enabled:
+                if is_enabled:
+                    # 启用任务
+                    if self._is_enabled and self.scheduler and self.scheduler.running:
+                        try:
+                            self._add_job(scheduled_task, db=db)
+                            logger.info(f"已启用定时任务: {scheduled_task.task_name}")
+                        except Exception as e:
+                            logger.error(
+                                f"启用定时任务失败: {scheduled_task.task_name} - {e}",
+                                exc_info=True,
+                            )
+                            scheduled_task.is_enabled = False
+                            db.commit()
+                            raise
+                else:
+                    # 禁用任务
+                    if self.scheduler and self.scheduler.running:
+                        job_id = f"scheduled_task_{scheduled_task_id}"
+                        try:
+                            self.scheduler.remove_job(job_id)
+                            if job_id in self._job_mapping:
+                                del self._job_mapping[job_id]
+                            logger.info(f"已禁用定时任务: {scheduled_task.task_name}")
+                        except Exception as e:
+                            logger.warning(
+                                f"从调度器移除任务失败: {scheduled_task.task_name} - {e}"
+                            )
+
+        db.commit()
+        db.refresh(scheduled_task)
+
+        logger.info(f"更新定时任务: {scheduled_task.task_name} (ID: {scheduled_task_id})")
+        return scheduled_task
+
 
 # 全局调度器实例
 _scheduler_service: Optional[SchedulerService] = None

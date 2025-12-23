@@ -158,8 +158,6 @@ MNR-Law-Crawler-Online/
 ├── generate-env.ps1       # Windows环境变量生成脚本
 ├── generate_env.py        # Python环境变量生成脚本
 ├── 快速启动.ps1          # Windows启动脚本
-├── 数据流导图.md         # 数据流架构说明
-├── 数据流图表-Mermaid.md # 可视化流程图
 └── README.md             # 本文档
 ```
 

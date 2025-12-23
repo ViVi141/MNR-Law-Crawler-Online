@@ -4,12 +4,36 @@
       <template #header>
         <div class="card-header">
           <h2>定时任务管理</h2>
-          <el-button type="primary" @click="showCreateDialog = true">
+          <el-button
+            type="primary"
+            :disabled="!schedulerEnabled"
+            @click="showCreateDialog = true"
+          >
             <el-icon><Plus /></el-icon>
             新建定时任务
           </el-button>
         </div>
       </template>
+
+      <!-- 调度器状态提示 -->
+      <el-alert
+        v-if="!schedulerEnabled"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 20px"
+      >
+        <template #title>
+          <span>定时任务功能未启用</span>
+        </template>
+        <template #default>
+          <span>
+            定时任务功能当前未启用，无法创建和管理定时任务。请在
+            <router-link to="/settings">系统设置</router-link>
+            中启用定时任务功能。
+          </span>
+        </template>
+      </el-alert>
 
       <!-- 任务列表 -->
       <el-table v-loading="loading" :data="scheduledTasks" stripe style="width: 100%">
@@ -114,6 +138,8 @@ const saving = ref(false)
 const scheduledTasks = ref<ScheduledTask[]>([])
 const showCreateDialog = ref(false)
 const editingTask = ref<ScheduledTask | undefined>(undefined)
+const schedulerEnabled = ref(false)
+const schedulerRunning = ref(false)
 
 const pagination = reactive({
   page: 1,
@@ -177,14 +203,26 @@ const handlePageChange = () => {
 
 const handleToggle = async (task: ScheduledTask & { _toggling: boolean }) => {
   task._toggling = true
+  const oldEnabled = task.is_enabled
   try {
     await scheduledTasksApi.toggleScheduledTask(task.id, task.is_enabled)
     ElMessage.success(task.is_enabled ? '任务已启用' : '任务已禁用')
+    // 重新获取任务列表以同步状态
     await fetchTasks()
+    // 如果启用了任务但调度器未启用，更新调度器状态提示
+    if (task.is_enabled && !schedulerEnabled.value) {
+      await checkSchedulerStatus(false)
+    }
   } catch (error) {
-    task.is_enabled = !task.is_enabled
+    // 操作失败，恢复原状态
+    task.is_enabled = oldEnabled
     const apiError = error as ApiError
-    ElMessage.error(apiError.response?.data?.detail || '操作失败')
+    const errorMessage = apiError.response?.data?.detail || '操作失败'
+    ElMessage.error(errorMessage)
+    // 如果是调度器未启用的错误，更新状态提示
+    if (errorMessage.includes('定时任务功能未启用')) {
+      await checkSchedulerStatus(false)
+    }
   } finally {
     task._toggling = false
   }
@@ -221,10 +259,15 @@ const handleCancelDialog = () => {
 }
 
 const handleScheduledTaskSubmit = async (formData: ScheduledTaskFormData) => {
+  // 防止重复提交
+  if (saving.value) {
+    return
+  }
+  
   saving.value = true
   try {
     if (editingTask.value) {
-      // 更新定时任务 - 使用相同的创建接口进行更新
+      // 更新定时任务
       const updateRequest: ScheduledTaskCreateRequest = {
         task_type: formData.scheduled_task_type,
         task_name: formData.task_name,
@@ -248,16 +291,66 @@ const handleScheduledTaskSubmit = async (formData: ScheduledTaskFormData) => {
     }
 
     handleCancelDialog()
-    await fetchTasks()
+    // 重新获取任务列表和调度器状态
+    await Promise.all([fetchTasks(), checkSchedulerStatus(false)])
   } catch (error) {
     const apiError = error as ApiError
-    ElMessage.error(apiError.response?.data?.detail || '保存失败')
+    
+    // 处理验证错误（422）
+    if (apiError.response?.status === 422) {
+      const validationErrors = apiError.response?.data?.detail
+      if (Array.isArray(validationErrors)) {
+        const errorMessages = validationErrors.map((err: any) => {
+          const loc = Array.isArray(err.loc) ? err.loc.join('.') : err.loc
+          return `${loc}: ${err.msg}`
+        }).join('\n')
+        ElMessage.error(`验证失败:\n${errorMessages}`)
+      } else if (typeof validationErrors === 'string') {
+        ElMessage.error(validationErrors)
+      } else {
+        ElMessage.error(JSON.stringify(validationErrors) || '请求数据验证失败')
+      }
+    } else {
+      const errorMessage = apiError.response?.data?.detail || apiError.message || '保存失败'
+      ElMessage.error(errorMessage)
+      // 如果是调度器未启用的错误，更新状态提示
+      if (errorMessage.includes('定时任务功能未启用')) {
+        await checkSchedulerStatus(false)
+      }
+    }
   } finally {
     saving.value = false
   }
 }
 
+let statusCheckInProgress = false
+let lastStatusCheckTime = 0
+const STATUS_CHECK_INTERVAL = 2000 // 2秒内只检查一次
+
+const checkSchedulerStatus = async (force = false) => {
+  // 防止频繁检查
+  const now = Date.now()
+  if (!force && (statusCheckInProgress || (now - lastStatusCheckTime < STATUS_CHECK_INTERVAL))) {
+    return
+  }
+  
+  statusCheckInProgress = true
+  lastStatusCheckTime = now
+  
+  try {
+    const status = await scheduledTasksApi.getSchedulerStatus()
+    schedulerEnabled.value = status.enabled
+    schedulerRunning.value = status.running
+  } catch (error) {
+    // 获取失败时保持现有状态，避免误判为未启用
+  } finally {
+    statusCheckInProgress = false
+  }
+}
+
 onMounted(() => {
+  // 初始化时强制检查状态
+  checkSchedulerStatus(true)
   fetchTasks()
 })
 </script>

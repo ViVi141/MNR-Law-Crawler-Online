@@ -19,10 +19,12 @@ from ..schemas.scheduled_task import (
     ScheduledTaskRunsResponse,
 )
 from ..services.scheduler_service import get_scheduler_service
+from ..services.config_service import ConfigService
 from ..config import settings
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["定时任务"])
 logger = logging.getLogger(__name__)
+config_service = ConfigService()
 
 
 @router.post("/", response_model=ScheduledTaskResponse, status_code=201)
@@ -32,7 +34,14 @@ def create_scheduled_task(
     current_user: User = Depends(get_current_user),
 ):
     """创建定时任务"""
+    logger.info(f"收到创建定时任务请求: task_type={task_data.task_type}, task_name={task_data.task_name}")
+    logger.info(f"配置数据: {task_data.config}")
+    
     scheduler_service = get_scheduler_service()
+    # 如果配置已开启但调度器未启用，尝试动态启用
+    flags = config_service.get_feature_flags(db)
+    if flags.get("scheduler_enabled") and not scheduler_service.is_enabled():
+        scheduler_service.enable_scheduler()
     if not scheduler_service.is_enabled():
         raise HTTPException(
             status_code=400,
@@ -51,10 +60,37 @@ def create_scheduled_task(
         )
         return ScheduledTaskResponse.model_validate(task)
     except ValueError as e:
+        logger.warning(f"创建定时任务验证失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"创建定时任务失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.get("/status")
+def get_scheduler_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取调度器状态"""
+    try:
+        scheduler_service = get_scheduler_service()
+        # 如果配置里已开启但调度器未启用，尝试动态启用
+        flags = config_service.get_feature_flags(db)
+        if flags.get("scheduler_enabled") and not scheduler_service.is_enabled():
+            scheduler_service.enable_scheduler()
+        is_enabled = scheduler_service.is_enabled()
+        is_running = False
+        if hasattr(scheduler_service, "scheduler") and scheduler_service.scheduler is not None:
+            is_running = scheduler_service.scheduler.running
+        return {
+            "enabled": is_enabled,
+            "running": is_running,
+            "message": "定时任务功能已启用" if is_enabled else "定时任务功能未启用，请在系统配置中启用",
+        }
+    except Exception as e:
+        logger.error(f"获取调度器状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取调度器状态失败: {str(e)}")
 
 
 @router.get("/", response_model=ScheduledTaskListResponse)
@@ -103,6 +139,40 @@ def get_scheduled_task(
     except Exception as e:
         logger.error(f"获取定时任务详情失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取定时任务详情失败: {str(e)}")
+
+
+@router.put("/{task_id}", response_model=ScheduledTaskResponse)
+def update_scheduled_task(
+    task_id: int,
+    task_data: ScheduledTaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新定时任务"""
+    scheduler_service = get_scheduler_service()
+    
+    # 如果尝试启用任务但调度器未启用，则报错
+    if task_data.is_enabled is True and not scheduler_service.is_enabled():
+        raise HTTPException(
+            status_code=400,
+            detail="定时任务功能未启用，请在系统配置中启用定时任务功能",
+        )
+
+    try:
+        task = scheduler_service.update_scheduled_task(
+            db=db,
+            scheduled_task_id=task_id,
+            task_name=task_data.task_name,
+            cron_expression=task_data.cron_expression,
+            config=task_data.config,
+            is_enabled=task_data.is_enabled,
+        )
+        return ScheduledTaskResponse.model_validate(task)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"更新定时任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新定时任务失败: {str(e)}")
 
 
 @router.put("/{task_id}/enable", response_model=ScheduledTaskResponse)

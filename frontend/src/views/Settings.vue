@@ -450,7 +450,6 @@ const handleUpdateFeatureFlag = async (flagName: string, enabled: boolean) => {
         await configApi.updateS3Config({ enabled })
       } catch (e) {
         // S3配置更新失败不影响功能开关更新
-        console.warn('S3配置同步失败:', e)
       }
     }
     

@@ -540,21 +540,17 @@ const startProgressStreaming = (taskId: number) => {
   progressEventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      console.log('SSE收到消息:', data.type, data)
 
       if (data.type === 'connection_established') {
-        console.log('SSE连接已建立:', data.message)
         ElMessage.success('实时进度连接已建立')
         return
       }
 
       if (data.type === 'heartbeat') {
-        console.log('SSE心跳:', data.message)
         return
       }
 
       if (data.type === 'error') {
-        console.error('SSE错误:', data.message)
         ElMessage.error(`连接错误: ${data.message}`)
         return
       }
@@ -562,12 +558,6 @@ const startProgressStreaming = (taskId: number) => {
       if (data.type === 'task_update' || data.type === 'progress_update') {
         // 更新任务状态
         if (currentTask.value && currentTask.value.id === taskId) {
-          console.log('更新任务状态:', {
-            status: data.status,
-            hasProgressData: !!data.progress_data,
-            progressDataKeys: data.progress_data ? Object.keys(data.progress_data) : []
-          })
-
           if (data.status) {
             currentTask.value.status = data.status
           }
@@ -581,7 +571,6 @@ const startProgressStreaming = (taskId: number) => {
           // 更新详细进度数据
           if (data.progress_data) {
             currentTask.value.progress_data = data.progress_data
-            console.log('详细进度数据已更新')
 
             // 同步更新任务的基本统计信息
             if (data.progress_data.total_count) {
@@ -612,12 +601,10 @@ const startProgressStreaming = (taskId: number) => {
         fetchTasks()
       }
     } catch (error) {
-      console.error('SSE消息解析失败:', error)
     }
   }
 
   progressEventSource.onerror = (error) => {
-    console.error('SSE连接错误:', error)
     // 连接出错时，回退到轮询模式
     if (currentTask.value?.status === 'running') {
       startTaskDetailRefresh(taskId)
@@ -625,7 +612,6 @@ const startProgressStreaming = (taskId: number) => {
   }
 
   progressEventSource.onopen = () => {
-    console.log('SSE连接已建立')
     ElMessage.success('SSE连接已建立，开始接收实时进度')
   }
 }
@@ -677,7 +663,6 @@ const refreshCurrentTask = async (taskId: number) => {
       Object.assign(currentTask.value, updated)
     }
   } catch (error) {
-    console.error('刷新任务数据失败:', error)
   }
 }
 
@@ -685,7 +670,6 @@ const stopProgressStreaming = () => {
   if (progressEventSource) {
     progressEventSource.close()
     progressEventSource = null
-    console.log('SSE连接已断开')
   }
 }
 
@@ -761,7 +745,6 @@ const startTaskDetailRefresh = (taskId: number) => {
         }
       }
     } catch (error) {
-      console.error('刷新任务详情失败:', error)
       stopTaskDetailRefresh()
     }
   }, 2000)
@@ -974,7 +957,6 @@ const confirmDownload = async () => {
     const apiError = error as ApiError
     const errorMessage = apiError.response?.data?.detail || apiError.message || '下载文件失败'
     ElMessage.error(errorMessage)
-    console.error('下载文件失败:', error)
   } finally {
     downloading.value = false
     downloadingTask.value = null
