@@ -463,14 +463,15 @@ const handleCreateTask = async () => {
 const loadSourceNames = async () => {
   try {
     availableSourceNames.value = await policiesApi.getSourceNames()
-  } catch (error) {
+  } catch {
+    // 忽略错误，使用默认值
   }
 }
 
 const loadCategories = async (sourceName?: string) => {
   try {
     availableCategories.value = await policiesApi.getCategories(sourceName)
-  } catch (error) {
+  } catch {
     availableCategories.value = []
   }
 }

@@ -401,10 +401,19 @@ import type { TaskConfig } from '../types/common'
 interface TaskFormData {
   task_type: string
   task_name: string
-  config: TaskConfig
+  config?: TaskConfig
   autoStart?: boolean
   [key: string]: unknown
 }
+
+interface ScheduledTaskFormData {
+  scheduled_task_type: string
+  task_name: string
+  cron_expression: string
+  config: TaskConfig
+  is_enabled: boolean
+}
+
 import type { ApiError } from '../types/common'
 import dayjs from 'dayjs'
 
@@ -501,7 +510,18 @@ const handlePageChange = () => {
   fetchTasks()
 }
 
-const handleTaskSubmit = async (formData: TaskFormData) => {
+// 类型守卫：检查是否为 TaskFormData（非定时任务）
+const isTaskFormData = (data: TaskFormData | ScheduledTaskFormData): data is TaskFormData => {
+  return 'task_type' in data && data.task_type !== 'scheduled_task'
+}
+
+const handleTaskSubmit = async (formData: TaskFormData | ScheduledTaskFormData) => {
+  // 只处理普通任务，定时任务应该由 ScheduledTasks 页面处理
+  if (!isTaskFormData(formData)) {
+    ElMessage.error('定时任务应在定时任务页面创建')
+    return
+  }
+
   creating.value = true
   try {
     const request: TaskCreateRequest = {
@@ -663,7 +683,8 @@ const refreshCurrentTask = async (taskId: number) => {
     if (currentTask.value && currentTask.value.id === taskId) {
       Object.assign(currentTask.value, updated)
     }
-  } catch (error) {
+  } catch {
+    // 忽略刷新错误
   }
 }
 
@@ -745,7 +766,7 @@ const startTaskDetailRefresh = (taskId: number) => {
           stopTaskDetailRefresh()
         }
       }
-    } catch (error) {
+    } catch {
       stopTaskDetailRefresh()
     }
   }, 2000)

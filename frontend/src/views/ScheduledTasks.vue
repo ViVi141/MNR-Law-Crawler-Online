@@ -300,7 +300,7 @@ const handleScheduledTaskSubmit = async (formData: ScheduledTaskFormData) => {
     if (apiError.response?.status === 422) {
       const validationErrors = apiError.response?.data?.detail
       if (Array.isArray(validationErrors)) {
-        const errorMessages = validationErrors.map((err: any) => {
+        const errorMessages = validationErrors.map((err: { loc?: string | string[]; msg?: string }) => {
           const loc = Array.isArray(err.loc) ? err.loc.join('.') : err.loc
           return `${loc}: ${err.msg}`
         }).join('\n')
@@ -341,7 +341,7 @@ const checkSchedulerStatus = async (force = false) => {
     const status = await scheduledTasksApi.getSchedulerStatus()
     schedulerEnabled.value = status.enabled
     schedulerRunning.value = status.running
-  } catch (error) {
+  } catch {
     // 获取失败时保持现有状态，避免误判为未启用
   } finally {
     statusCheckInProgress = false

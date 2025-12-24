@@ -1,6 +1,6 @@
 {
   "name": "mnr-law-crawler-web-frontend",
-  "version": "3.0.0",
+  "version": "3.1.2",
   "type": "module",
   "description": "MNR Law Crawler Web - Frontend (Vue 3)",
   "scripts": {

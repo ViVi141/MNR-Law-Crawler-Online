@@ -448,7 +448,7 @@ const handleUpdateFeatureFlag = async (flagName: string, enabled: boolean) => {
       // 同时更新 S3 配置到后端
       try {
         await configApi.updateS3Config({ enabled })
-      } catch (e) {
+      } catch {
         // S3配置更新失败不影响功能开关更新
       }
     }

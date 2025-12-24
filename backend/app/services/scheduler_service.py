@@ -950,7 +950,9 @@ class SchedulerService:
         db.commit()
         db.refresh(scheduled_task)
 
-        logger.info(f"更新定时任务: {scheduled_task.task_name} (ID: {scheduled_task_id})")
+        logger.info(
+            f"更新定时任务: {scheduled_task.task_name} (ID: {scheduled_task_id})"
+        )
         return scheduled_task
 
 

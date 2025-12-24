@@ -34,9 +34,11 @@ def create_scheduled_task(
     current_user: User = Depends(get_current_user),
 ):
     """创建定时任务"""
-    logger.info(f"收到创建定时任务请求: task_type={task_data.task_type}, task_name={task_data.task_name}")
+    logger.info(
+        f"收到创建定时任务请求: task_type={task_data.task_type}, task_name={task_data.task_name}"
+    )
     logger.info(f"配置数据: {task_data.config}")
-    
+
     scheduler_service = get_scheduler_service()
     # 如果配置已开启但调度器未启用，尝试动态启用
     flags = config_service.get_feature_flags(db)
@@ -81,12 +83,19 @@ def get_scheduler_status(
             scheduler_service.enable_scheduler()
         is_enabled = scheduler_service.is_enabled()
         is_running = False
-        if hasattr(scheduler_service, "scheduler") and scheduler_service.scheduler is not None:
+        if (
+            hasattr(scheduler_service, "scheduler")
+            and scheduler_service.scheduler is not None
+        ):
             is_running = scheduler_service.scheduler.running
         return {
             "enabled": is_enabled,
             "running": is_running,
-            "message": "定时任务功能已启用" if is_enabled else "定时任务功能未启用，请在系统配置中启用",
+            "message": (
+                "定时任务功能已启用"
+                if is_enabled
+                else "定时任务功能未启用，请在系统配置中启用"
+            ),
         }
     except Exception as e:
         logger.error(f"获取调度器状态失败: {e}", exc_info=True)
@@ -150,7 +159,7 @@ def update_scheduled_task(
 ):
     """更新定时任务"""
     scheduler_service = get_scheduler_service()
-    
+
     # 如果尝试启用任务但调度器未启用，则报错
     if task_data.is_enabled is True and not scheduler_service.is_enabled():
         raise HTTPException(

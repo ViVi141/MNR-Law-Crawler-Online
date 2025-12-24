@@ -434,7 +434,7 @@ const loadDataSources = async () => {
         crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
       }
     }
-  } catch (error) {
+  } catch {
     // 使用默认数据源
     availableDataSources.value = [
       {
@@ -482,13 +482,13 @@ const loadEditData = () => {
   if (isScheduledTask(data)) {
     formData.cron_expression = data.cron_expression || '0 2 * * *'
     formData.is_enabled = data.is_enabled !== false
-    formData.scheduled_task_type = (data as any).scheduled_task_type || 'crawl_task'
+    formData.scheduled_task_type = (data as ScheduledTask & { scheduled_task_type?: string }).scheduled_task_type || 'crawl_task'
   } else {
     formData.autoStart = true
   }
 
   // 加载任务配置
-  const configSource = data.config_json || (data as any).config
+  const configSource = data.config_json || (data as Task & { config?: CrawlTaskConfig | BackupTaskConfig }).config
   if (configSource) {
     const config = configSource as CrawlTaskConfig | BackupTaskConfig
 
@@ -502,11 +502,11 @@ const loadEditData = () => {
         crawlConfigData.data_sources.map((ds: DataSourceConfig) => ds.name) : []
     } else if ((formData.task_type === 'backup_task') ||
                (formData.task_type === 'scheduled_task' && formData.scheduled_task_type === 'backup_task')) {
-      const backupConfigData = config as BackupTaskConfig
+      const backupConfigData = config as BackupTaskConfig & { retention_policy?: string; compression?: string; include_data?: string[] }
       backupConfig.backup_type = backupConfigData.backup_type || 'full'
-      backupConfig.retention_policy = (backupConfigData as any).retention_policy || 'keep_30_days'
-      backupConfig.compression = (backupConfigData as any).compression || 'gzip'
-      backupConfig.include_data = (backupConfigData as any).include_data || ['database', 'files', 'config']
+      backupConfig.retention_policy = backupConfigData.retention_policy || 'keep_30_days'
+      backupConfig.compression = backupConfigData.compression || 'gzip'
+      backupConfig.include_data = backupConfigData.include_data || ['database', 'files', 'config']
     }
   }
 }
@@ -668,7 +668,6 @@ const handleSubmit = async () => {
                   ...source,
                   enabled: true
                 }))
-            } else {
             }
           } else {
             config = {
@@ -687,7 +686,7 @@ const handleSubmit = async () => {
           autoStart: formData.autoStart
         }
         emit('submit', taskSubmitData)
-      } catch (error) {
+      } catch {
         ElMessage.error('提交失败，请重试')
       } finally {
         loading.value = false
