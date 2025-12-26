@@ -1,9 +1,9 @@
 # ==============================================================================
-# MNR Law Crawler Online - 爬虫核心模块
+# Policy Crawler Pro - 爬虫核心模块
 # ==============================================================================
 #
-# 项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-# 项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+# 项目名称: Policy Crawler Pro (政策爬虫专业版)
+# 项目地址: https://github.com/ViVi141/policy-crawler-pro
 # 作者: ViVi141
 # 许可证: MIT License
 #
@@ -33,6 +33,8 @@ from .api_client import APIClient
 from .converter import DocumentConverter
 from .models import Policy, CrawlProgress
 from .mnr_spider import MNRSpider
+from .gd_spider import GDSpider
+from .gd_api_client import GDAPIClient
 
 # 使用模块级logger
 logger = logging.getLogger(__name__)
@@ -622,47 +624,121 @@ class PolicyCrawler:
 
             # 为当前数据源创建临时配置
             temp_config = Config()
-            temp_config.config = self.config.config.copy()
+            temp_config.config = self.config.config.copy()  # 继承主配置（包括代理配置）
             # 确保数据源明确标记为启用
             data_source_copy = data_source.copy()
             data_source_copy["enabled"] = True
             temp_config.config["data_sources"] = [data_source_copy]
-            temp_config.config["base_url"] = data_source.get(
-                "base_url", "https://gi.mnr.gov.cn/"
-            )
-            temp_config.config["search_api"] = data_source.get(
-                "search_api", "https://search.mnr.gov.cn/was5/web/search"
-            )
-            temp_config.config["channel_id"] = data_source.get("channel_id", "216640")
 
-            # 为当前数据源创建MNR爬虫（会自动选择对应的HTML解析器）
-            # 注意：MNRSpider已在文件顶部导入，这里重新导入会导致变量遮蔽
-            temp_api_client = APIClient(temp_config)
-            mnr_spider = MNRSpider(temp_config, temp_api_client)
+            # 确保代理配置被正确传递（从主配置继承）
+            temp_config.config["use_proxy"] = self.config.get("use_proxy", False)
+            temp_config.config["kuaidaili_api_key"] = self.config.get(
+                "kuaidaili_api_key", ""
+            )
 
-            if callback:
-                parser_type = type(mnr_spider.html_parser).__name__
-                callback(
-                    f"使用解析器: {parser_type} (适配 {data_source.get('base_url', '')})"
+            # 判断数据源类型
+            source_name = data_source.get("name", "")
+            is_gd_source = "广东" in source_name or data_source.get("type") == "gd"
+
+            # 初始化policies变量
+            policies = []
+
+            if is_gd_source:
+                # 广东省数据源
+                temp_config.config["api_base_url"] = data_source.get(
+                    "api_base_url", "https://www.gdpc.gov.cn:443/bascdata"
                 )
 
-            # 如果设置了 limit_pages，临时修改 max_pages
-            original_max_pages = mnr_spider.max_pages
-            if limit_pages is not None:
-                mnr_spider.max_pages = limit_pages
+                # 创建GD爬虫（配置已包含代理设置）
+                temp_gd_api_client = GDAPIClient(temp_config)
+                spider = GDSpider(temp_config, temp_gd_api_client)
 
+                if callback:
+                    callback(
+                        f"使用爬虫: GDSpider (适配 {data_source.get('api_base_url', '')})"
+                    )
+
+                # 如果设置了 limit_pages，临时修改 max_pages
+                original_max_pages = spider.max_pages
+                if limit_pages is not None:
+                    spider.max_pages = limit_pages
+
+                try:
+                    # 获取政策类型列表（从数据源配置或使用默认值）
+                    law_rule_types = data_source.get("law_rule_types", [1, 2, 3])
+                    policies = spider.crawl_policies(
+                        keywords=keywords,  # GD API暂不支持关键词，但保留接口兼容性
+                        callback=callback,
+                        start_date=start_date,  # GD API暂不支持日期过滤，但保留接口兼容性
+                        end_date=end_date,
+                        law_rule_types=law_rule_types,
+                        stop_callback=stop_check,
+                        policy_callback=None,
+                    )
+                finally:
+                    # 恢复原始 max_pages
+                    spider.max_pages = original_max_pages
+                    # 关闭临时API客户端
+                    if hasattr(temp_gd_api_client, "close"):
+                        try:
+                            temp_gd_api_client.close()
+                        except Exception:
+                            pass
+            else:
+                # MNR数据源（原有逻辑）
+                temp_config.config["base_url"] = data_source.get(
+                    "base_url", "https://gi.mnr.gov.cn/"
+                )
+                temp_config.config["search_api"] = data_source.get(
+                    "search_api", "https://search.mnr.gov.cn/was5/web/search"
+                )
+                temp_config.config["channel_id"] = data_source.get(
+                    "channel_id", "216640"
+                )
+
+                # 确保代理配置被正确传递（从主配置继承）
+                temp_config.config["use_proxy"] = self.config.get("use_proxy", False)
+                temp_config.config["kuaidaili_api_key"] = self.config.get(
+                    "kuaidaili_api_key", ""
+                )
+
+                # 为当前数据源创建MNR爬虫（会自动选择对应的HTML解析器，配置已包含代理设置）
+                temp_api_client = APIClient(temp_config)
+                spider = MNRSpider(temp_config, temp_api_client)
+
+                if callback:
+                    parser_type = type(spider.html_parser).__name__
+                    callback(
+                        f"使用解析器: {parser_type} (适配 {data_source.get('base_url', '')})"
+                    )
+
+                # 如果设置了 limit_pages，临时修改 max_pages
+                original_max_pages = spider.max_pages
+                if limit_pages is not None:
+                    spider.max_pages = limit_pages
+
+                try:
+                    policies = spider.crawl_policies(
+                        keywords=keywords,
+                        callback=callback,
+                        start_date=start_date,
+                        end_date=end_date,
+                        category=None,  # 搜索全部分类
+                        stop_callback=stop_check,
+                        policy_callback=None,
+                    )
+                finally:
+                    # 恢复原始 max_pages
+                    spider.max_pages = original_max_pages
+                    # 关闭临时API客户端
+                    if hasattr(temp_api_client, "close"):
+                        try:
+                            temp_api_client.close()
+                        except Exception:
+                            pass
+
+            # 去重并添加到总列表（两个分支共用）
             try:
-                policies = mnr_spider.crawl_policies(
-                    keywords=keywords,
-                    callback=callback,
-                    start_date=start_date,
-                    end_date=end_date,
-                    category=None,  # 搜索全部分类
-                    stop_callback=stop_check,
-                    policy_callback=None,
-                )
-
-                # 去重并添加到总列表
                 source_policy_count = 0
                 for policy in policies:
                     policy_id = policy.id
@@ -675,7 +751,6 @@ class PolicyCrawler:
                     callback(
                         f"数据源 {source_name} 完成，获取 {len(policies)} 条政策（新增 {source_policy_count} 条，去重后）"
                     )
-
             except Exception as e:
                 # 捕获异常，记录错误但继续处理下一个数据源
                 error_msg = f"数据源 {source_name} 爬取失败: {str(e)}"
@@ -687,16 +762,7 @@ class PolicyCrawler:
                 # 使用logger记录失败信息
                 logger.error(f"数据源 {source_name} 爬取失败: {error_msg}")
                 # 继续处理下一个数据源，不中断整个流程
-
-            finally:
-                # 恢复原始 max_pages
-                mnr_spider.max_pages = original_max_pages
-                # 关闭临时API客户端
-                if hasattr(temp_api_client, "close"):
-                    try:
-                        temp_api_client.close()
-                    except Exception:
-                        pass  # 忽略关闭时的异常
+                policies = []  # 确保policies变量已定义
 
         if callback:
             callback(f"\n所有数据源爬取完成，总计 {len(all_policies)} 条政策（已去重）")
@@ -740,62 +806,324 @@ class PolicyCrawler:
                 logger.debug(f"获取政策详情页: {policy.title[:50]}...")
                 # 获取数据源信息（如果policy对象有保存）
                 data_source = getattr(policy, "_data_source", None)
-                detail_result = self.api_client.get_policy_detail(
-                    policy.link, data_source
+
+                # 判断数据源类型
+                source_name = data_source.get("name", "") if data_source else ""
+                is_gd_source = "广东" in source_name or (
+                    data_source and data_source.get("type") == "gd"
                 )
 
-                if not detail_result:
-                    raise Exception("获取详情页失败：无响应")
-
-                policy.content = detail_result.get("content", "")
-                attachments = detail_result.get("attachments", [])
-
-                # 更新元信息（如果详情页有更完整的信息）
-                metadata = detail_result.get("metadata", {})
-                if metadata:
-                    # 更新发布日期（如果详情页有且列表页没有，或列表页的值不是日期格式）
-                    if metadata.get("pub_date"):
-                        # 验证是否是日期格式
-                        is_date_format = (
-                            any(
-                                keyword in metadata["pub_date"]
-                                for keyword in ["年", "月", "日"]
+                if is_gd_source:
+                    # 使用GD爬虫获取详情
+                    if hasattr(policy, "_gd_id"):
+                        # 创建临时GD爬虫实例
+                        temp_config = Config()
+                        temp_config.config = (
+                            self.config.config.copy()
+                        )  # 继承主配置（包括代理配置）
+                        if data_source:
+                            temp_config.config["api_base_url"] = data_source.get(
+                                "api_base_url", "https://www.gdpc.gov.cn:443/bascdata"
                             )
-                            or len(metadata["pub_date"]) >= 8
+                        # 确保代理配置被正确传递
+                        temp_config.config["use_proxy"] = self.config.get(
+                            "use_proxy", False
                         )
-                        if is_date_format:
-                            # 如果列表页没有，或者列表页的值不是日期格式，则更新
-                            if not policy.pub_date or not any(
-                                keyword in policy.pub_date
-                                for keyword in ["年", "月", "日"]
-                            ):
-                                parsed_date = self._parse_date(metadata["pub_date"])
-                                if parsed_date:
-                                    policy.pub_date = parsed_date.strftime("%Y-%m-%d")
-                                else:
-                                    policy.pub_date = metadata["pub_date"].strip()
-                    # 更新发布机构（如果详情页有）
-                    if metadata.get("publisher"):
-                        policy.publisher = metadata["publisher"]
-                    # 更新效力级别（level字段，如果详情页有）
-                    if metadata.get("level"):
-                        policy.level = metadata["level"]
-                    # 更新有效性（validity字段，如果详情页有）
-                    if metadata.get("validity"):
-                        policy.validity = metadata["validity"]
-                    # 更新生效日期（如果详情页有）
-                    if metadata.get("effective_date"):
-                        parsed_date = self._parse_date(metadata["effective_date"])
-                        if parsed_date:
-                            policy.effective_date = parsed_date.strftime("%Y-%m-%d")
-                        else:
-                            policy.effective_date = metadata["effective_date"].strip()
-                    # 更新分类（如果详情页有）
-                    if metadata.get("category"):
-                        policy.category = metadata["category"]
-                    # 更新文号（如果详情页有且列表页没有）
-                    if metadata.get("doc_number") and not policy.doc_number:
-                        policy.doc_number = metadata["doc_number"]
+                        temp_config.config["kuaidaili_api_key"] = self.config.get(
+                            "kuaidaili_api_key", ""
+                        )
+                        temp_gd_api_client = GDAPIClient(temp_config)
+                        gd_spider = GDSpider(temp_config, temp_gd_api_client)
+
+                        # 初始化detail_result为None（GD数据源不使用metadata）
+                        detail_result = None
+
+                        try:
+                            detail = gd_spider.get_policy_detail(policy)
+                            if detail:
+                                policy.content = detail.policy.content
+                                policy.effective_date = detail.policy.effective_date
+                                # 转换附件格式
+                                attachments = [
+                                    {
+                                        "file_name": att.file_name,
+                                        "file_url": att.file_url,
+                                        "file_ext": att.file_ext,
+                                    }
+                                    for att in detail.attachments
+                                ]
+
+                                # 如果API返回的content为空，尝试从附件中提取正文
+                                # 原项目的逻辑：正文内容主要来自附件文件转换，而不是API的content字段
+                                if not policy.content or not policy.content.strip():
+                                    if callback:
+                                        callback(
+                                            "API返回的正文为空，尝试从附件中提取..."
+                                        )
+                                    logger.info(
+                                        f"API返回的正文为空，尝试从附件中提取: {policy.title}"
+                                    )
+
+                                    # 下载并转换附件作为正文内容
+                                    if attachments:
+                                        content_parts = []
+                                        target_files = []
+
+                                        # 筛选可转换的文件（DOCX、DOC、PDF）
+                                        for att in attachments:
+                                            # 同时检查 file_ext 和从 file_name 提取的扩展名
+                                            file_ext_lower = (
+                                                (att.get("file_ext") or "")
+                                                .lower()
+                                                .strip()
+                                            )
+                                            file_name = att.get("file_name", "")
+                                            file_name_ext = (
+                                                os.path.splitext(file_name)[1]
+                                                .lower()
+                                                .strip(".")
+                                                if file_name
+                                                else ""
+                                            )
+
+                                            # 优先使用 file_name 的扩展名（更可靠），如果为空则使用 file_ext
+                                            ext_to_check = (
+                                                file_name_ext
+                                                if file_name_ext
+                                                else file_ext_lower
+                                            )
+
+                                            # 严格匹配扩展名
+                                            is_docx = ext_to_check == "docx"
+                                            is_doc = (
+                                                ext_to_check == "doc" and not is_docx
+                                            )
+                                            is_pdf = ext_to_check == "pdf"
+
+                                            # 根据配置决定是否下载（默认下载DOCX和DOC）
+                                            should_download = False
+                                            if is_docx and self.config.get(
+                                                "download_docx", True
+                                            ):
+                                                should_download = True
+                                            elif is_doc and self.config.get(
+                                                "download_doc", True
+                                            ):
+                                                should_download = True
+                                            elif is_pdf and self.config.get(
+                                                "download_pdf", False
+                                            ):
+                                                should_download = True
+
+                                            if should_download:
+                                                target_files.append(att)
+
+                                        if target_files:
+                                            if callback:
+                                                callback(
+                                                    f"  从 {len(attachments)} 个附件中筛选出 {len(target_files)} 个可转换文件"
+                                                )
+
+                                            for i, att in enumerate(target_files, 1):
+                                                file_name = att.get("file_name", "")
+                                                if callback:
+                                                    callback(
+                                                        f"  [{i}/{len(target_files)}] 处理: {file_name}"
+                                                    )
+
+                                                # 创建临时文件路径
+                                                import tempfile
+
+                                                temp_dir = tempfile.mkdtemp()
+                                                # 确保文件名安全
+                                                safe_file_name = (
+                                                    "".join(
+                                                        c
+                                                        for c in file_name
+                                                        if c.isalnum()
+                                                        or c in (" ", "-", "_", ".")
+                                                    )
+                                                    or f"file_{i}"
+                                                )
+                                                temp_file_path = os.path.join(
+                                                    temp_dir, safe_file_name
+                                                )
+
+                                                try:
+                                                    # 下载文件
+                                                    if temp_gd_api_client.download_file(
+                                                        att.get("file_url", ""),
+                                                        temp_file_path,
+                                                    ):
+                                                        if callback:
+                                                            callback(
+                                                                "    下载成功，转换为文本..."
+                                                            )
+
+                                                        # 转换为文本
+                                                        converted_content = (
+                                                            self.converter.convert(
+                                                                temp_file_path
+                                                            )
+                                                        )
+                                                        if converted_content:
+                                                            content_parts.append(
+                                                                f"\n\n## {file_name}\n\n"
+                                                            )
+                                                            content_parts.append(
+                                                                converted_content
+                                                            )
+                                                            if callback:
+                                                                callback(
+                                                                    "    [OK] 转换成功"
+                                                                )
+                                                        else:
+                                                            logger.warning(
+                                                                f"附件转换失败: {file_name}"
+                                                            )
+                                                            if callback:
+                                                                callback(
+                                                                    "    [X] 转换失败"
+                                                                )
+                                                    else:
+                                                        logger.warning(
+                                                            f"附件下载失败: {file_name}"
+                                                        )
+                                                        if callback:
+                                                            callback("    [X] 下载失败")
+                                                except Exception as e:
+                                                    logger.error(
+                                                        f"处理附件时出错: {file_name}, {e}",
+                                                        exc_info=True,
+                                                    )
+                                                    if callback:
+                                                        callback(
+                                                            f"    [X] 处理出错: {str(e)[:50]}"
+                                                        )
+                                                finally:
+                                                    # 清理临时文件
+                                                    try:
+                                                        if os.path.exists(
+                                                            temp_file_path
+                                                        ):
+                                                            os.remove(temp_file_path)
+                                                        if os.path.exists(temp_dir):
+                                                            os.rmdir(temp_dir)
+                                                    except Exception as e:
+                                                        logger.debug(
+                                                            f"清理临时文件失败: {e}"
+                                                        )
+
+                                                # 文件间延迟
+                                                if i < len(target_files):
+                                                    time.sleep(0.3)
+
+                                            if content_parts:
+                                                policy.content = "\n".join(
+                                                    content_parts
+                                                )
+                                                if callback:
+                                                    callback(
+                                                        f"  [OK] 已从附件提取正文内容（{len(target_files)} 个文件）"
+                                                    )
+                                                logger.info(
+                                                    f"已从附件提取正文内容: {policy.title}"
+                                                )
+                                            else:
+                                                logger.warning(
+                                                    f"无法从附件提取正文内容: {policy.title}"
+                                                )
+                                                if callback:
+                                                    callback(
+                                                        "  [X] 无法从附件提取正文内容"
+                                                    )
+                                        else:
+                                            logger.warning(
+                                                f"没有可转换的附件文件: {policy.title}"
+                                            )
+                                            if callback:
+                                                callback(
+                                                    "  [X] 没有可转换的附件文件（需要DOCX/DOC/PDF格式）"
+                                                )
+                                    else:
+                                        logger.warning(
+                                            f"没有附件可提取正文: {policy.title}"
+                                        )
+                                        if callback:
+                                            callback("  [X] 没有附件")
+                            else:
+                                raise Exception("获取详情页失败：无响应")
+                        finally:
+                            if hasattr(temp_gd_api_client, "close"):
+                                try:
+                                    temp_gd_api_client.close()
+                                except Exception:
+                                    pass
+                    else:
+                        raise Exception("政策对象缺少GD数据源必需的属性")
+                else:
+                    # 使用MNR API客户端获取详情
+                    detail_result = self.api_client.get_policy_detail(
+                        policy.link, data_source
+                    )
+
+                    if not detail_result:
+                        raise Exception("获取详情页失败：无响应")
+
+                    policy.content = detail_result.get("content", "")
+                    attachments = detail_result.get("attachments", [])
+
+                # 更新元信息（如果详情页有更完整的信息，仅MNR数据源）
+                if detail_result:
+                    metadata = detail_result.get("metadata", {})
+                    if metadata:
+                        # 更新发布日期（如果详情页有且列表页没有，或列表页的值不是日期格式）
+                        if metadata.get("pub_date"):
+                            # 验证是否是日期格式
+                            is_date_format = (
+                                any(
+                                    keyword in metadata["pub_date"]
+                                    for keyword in ["年", "月", "日"]
+                                )
+                                or len(metadata["pub_date"]) >= 8
+                            )
+                            if is_date_format:
+                                # 如果列表页没有，或者列表页的值不是日期格式，则更新
+                                if not policy.pub_date or not any(
+                                    keyword in policy.pub_date
+                                    for keyword in ["年", "月", "日"]
+                                ):
+                                    parsed_date = self._parse_date(metadata["pub_date"])
+                                    if parsed_date:
+                                        policy.pub_date = parsed_date.strftime(
+                                            "%Y-%m-%d"
+                                        )
+                                    else:
+                                        policy.pub_date = metadata["pub_date"].strip()
+                        # 更新发布机构（如果详情页有）
+                        if metadata.get("publisher"):
+                            policy.publisher = metadata["publisher"]
+                        # 更新效力级别（level字段，如果详情页有）
+                        if metadata.get("level"):
+                            policy.level = metadata["level"]
+                        # 更新有效性（validity字段，如果详情页有）
+                        if metadata.get("validity"):
+                            policy.validity = metadata["validity"]
+                        # 更新生效日期（如果详情页有）
+                        if metadata.get("effective_date"):
+                            parsed_date = self._parse_date(metadata["effective_date"])
+                            if parsed_date:
+                                policy.effective_date = parsed_date.strftime("%Y-%m-%d")
+                            else:
+                                policy.effective_date = metadata[
+                                    "effective_date"
+                                ].strip()
+                        # 更新分类（如果详情页有）
+                        if metadata.get("category"):
+                            policy.category = metadata["category"]
+                        # 更新文号（如果详情页有且列表页没有）
+                        if metadata.get("doc_number") and not policy.doc_number:
+                            policy.doc_number = metadata["doc_number"]
 
                 # 后备逻辑：根据文号推断发布机构和效力级别
                 if policy.doc_number and not policy.publisher:

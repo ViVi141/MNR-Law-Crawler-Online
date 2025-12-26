@@ -229,7 +229,7 @@ class EmailService:
             else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        subject = f"[MNR Law Crawler] 任务开始: {task_name}"
+        subject = f"[Policy Crawler Pro] 任务开始: {task_name}"
 
         body = f"""
 任务开始执行通知
@@ -343,7 +343,7 @@ class EmailService:
         end_time_str = utc_to_beijing(end_time or current_time)
         start_time_str = utc_to_beijing(start_time) if start_time else "N/A"
 
-        subject = f"[MNR Law Crawler] 任务{status_text}: {task_name}"
+        subject = f"[Policy Crawler Pro] 任务{status_text}: {task_name}"
 
         body = f"""
 任务执行通知
@@ -406,7 +406,7 @@ class EmailService:
         body_html += """
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #999; font-size: 12px; text-align: center;">
-            此邮件由 MNR Law Crawler 系统自动发送
+            此邮件由 Policy Crawler Pro 系统自动发送
         </p>
     </div>
 </body>
@@ -455,7 +455,7 @@ class EmailService:
         )
         backup_type_text = "完整备份" if backup_type == "full" else "增量备份"
 
-        subject = f"[MNR Law Crawler] 备份{status_text}: {backup_type_text}"
+        subject = f"[Policy Crawler Pro] 备份{status_text}: {backup_type_text}"
 
         body = f"""
 数据库备份通知
@@ -501,7 +501,7 @@ class EmailService:
         body_html += """
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <p style="color: #999; font-size: 12px; text-align: center;">
-            此邮件由 MNR Law Crawler 系统自动发送
+            此邮件由 Policy Crawler Pro 系统自动发送
         </p>
     </div>
 </body>
@@ -529,7 +529,7 @@ class EmailService:
             level, "信息"
         )
 
-        subject = f"[MNR Law Crawler] {level_text}: {title}"
+        subject = f"[Policy Crawler Pro] {level_text}: {title}"
 
         body = f"""
 系统通知

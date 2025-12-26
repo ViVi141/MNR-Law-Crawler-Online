@@ -1,9 +1,9 @@
 // ==============================================================================
-// MNR Law Crawler Online - Vue路由配置
+// Policy Crawler Pro - Vue路由配置
 // ==============================================================================
 //
-// 项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-// 项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+// 项目名称: Policy Crawler Pro (政策爬虫专业版)
+// 项目地址: https://github.com/ViVi141/policy-crawler-pro
 // 作者: ViVi141
 // 许可证: MIT License
 //

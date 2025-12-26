@@ -262,7 +262,7 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
                         "utf-8",
                     )
                 )
-                msg["Subject"] = "[MNR Law Crawler] 密码重置通知"
+                msg["Subject"] = "[Policy Crawler Pro] 密码重置通知"
                 msg["From"] = from_address
                 msg["To"] = to_email
 

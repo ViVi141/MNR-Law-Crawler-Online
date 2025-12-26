@@ -63,23 +63,53 @@ export const configApi = {
   // 获取数据源列表
   getDataSources(): Promise<{ data_sources: Array<{
     name: string
-    base_url: string
-    search_api: string
-    ajax_api: string
-    channel_id: string
+    base_url?: string
+    search_api?: string
+    ajax_api?: string
+    channel_id?: string
     enabled: boolean
+    // GD数据源特有字段
+    type?: string
+    api_base_url?: string
+    law_rule_types?: number[]
   }> }> {
     return apiClient.get('/api/config/data-sources').then((res) => res.data)
   },
 
   // 获取爬虫配置
-  getCrawlerConfig(): Promise<{ request_delay: number; use_proxy: boolean }> {
+  getCrawlerConfig(): Promise<{ 
+    request_delay: number
+    use_proxy: boolean
+    kuaidaili_secret_id?: string
+    kuaidaili_secret_key?: string
+    kuaidaili_api_key?: string
+  }> {
     return apiClient.get('/api/config/crawler').then((res) => res.data)
   },
 
   // 更新爬虫配置
-  updateCrawlerConfig(data: { request_delay?: number; use_proxy?: boolean }): Promise<{ request_delay: number; use_proxy: boolean }> {
+  updateCrawlerConfig(data: { 
+    request_delay?: number
+    use_proxy?: boolean
+    kuaidaili_secret_id?: string
+    kuaidaili_secret_key?: string
+    kuaidaili_api_key?: string
+  }): Promise<{ 
+    request_delay: number
+    use_proxy: boolean
+    kuaidaili_secret_id?: string
+    kuaidaili_secret_key?: string
+    kuaidaili_api_key?: string
+  }> {
     return apiClient.put('/api/config/crawler', data).then((res) => res.data)
+  },
+
+  // 测试快代理连接
+  testKDLConnection(secretId: string, secretKey: string): Promise<TestResponse> {
+    return apiClient.post('/api/config/crawler/test-kdl', {
+      secret_id: secretId,
+      secret_key: secretKey,
+    }).then((res) => res.data)
   },
 
   // 检查邮件服务是否可用（公开端点，不需要认证）

@@ -1,9 +1,9 @@
 # ==============================================================================
-# MNR Law Crawler Online - FastAPI主应用
+# Policy Crawler Pro - FastAPI主应用
 # ==============================================================================
 #
-# 项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-# 项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+# 项目名称: Policy Crawler Pro (政策爬虫专业版)
+# 项目地址: https://github.com/ViVi141/policy-crawler-pro
 # 作者: ViVi141
 # 许可证: MIT License
 #
@@ -136,6 +136,83 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         # 如果表不存在等严重错误，记录警告但不阻止启动
         logger.warning(f"创建默认用户失败（可忽略）: {e}")
+
+    # 初始化默认系统配置（如果不存在）
+    try:
+        from .database import SessionLocal
+        from .services.config_service import ConfigService
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            # 使用数据库锁来防止并发创建
+            db.execute(text("SELECT pg_advisory_lock(123457)"))
+            try:
+                config_service = ConfigService()
+
+                # 初始化默认爬虫配置（如果不存在）
+                # 检查配置是否存在，如果不存在则创建
+                if not config_service.get_config(
+                    db, "request_delay", category="crawler"
+                ):
+                    config_service.set_config(
+                        db,
+                        "request_delay",
+                        0.5,
+                        category="crawler",
+                        description="爬取延迟（秒）",
+                    )
+                    logger.info("初始化默认爬虫配置: request_delay=0.5")
+
+                if not config_service.get_config(db, "use_proxy", category="crawler"):
+                    config_service.set_config(
+                        db,
+                        "use_proxy",
+                        False,
+                        category="crawler",
+                        description="是否使用代理",
+                    )
+                    logger.info("初始化默认爬虫配置: use_proxy=False")
+
+                if not config_service.get_config(
+                    db, "kuaidaili_secret_id", category="crawler"
+                ):
+                    config_service.set_config(
+                        db,
+                        "kuaidaili_secret_id",
+                        "",
+                        category="crawler",
+                        description="快代理SecretId",
+                    )
+                    logger.info("初始化默认爬虫配置: kuaidaili_secret_id=''")
+
+                if not config_service.get_config(
+                    db, "kuaidaili_secret_key", category="crawler"
+                ):
+                    config_service.set_config(
+                        db,
+                        "kuaidaili_secret_key",
+                        "",
+                        category="crawler",
+                        description="快代理SecretKey",
+                    )
+                    logger.info("初始化默认爬虫配置: kuaidaili_secret_key=''")
+
+            finally:
+                # 释放锁
+                db.execute(text("SELECT pg_advisory_unlock(123457)"))
+        except Exception as config_error:
+            # 捕获所有数据库错误，包括锁相关的错误
+            error_msg = str(config_error).lower()
+            if "duplicate key" in error_msg or "already exists" in error_msg:
+                logger.info("默认配置已存在，跳过初始化")
+            else:
+                logger.warning(f"初始化默认配置失败（可忽略）: {config_error}")
+        finally:
+            db.close()
+    except Exception as e:
+        # 如果表不存在等严重错误，记录警告但不阻止启动
+        logger.warning(f"初始化默认配置失败（可忽略）: {e}")
 
     # 启动定时任务调度器
     try:

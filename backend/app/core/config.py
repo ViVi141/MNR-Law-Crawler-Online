@@ -30,6 +30,13 @@ class Config:
                 "channel_id": "174757",
                 "enabled": False,
             },
+            {
+                "name": "广东省法规",
+                "type": "gd",
+                "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
+                "law_rule_types": [1, 2, 3],  # 1=地方性法规, 2=政府规章, 3=规范性文件
+                "enabled": False,
+            },
         ],
         # 兼容旧配置（向后兼容，默认使用政府信息公开平台）
         "base_url": "https://gi.mnr.gov.cn/",
@@ -198,5 +205,11 @@ class Config:
 
     @property
     def kuaidaili_api_key(self) -> str:
-        """快代理API密钥"""
+        """快代理API密钥（兼容旧格式）"""
+        # 优先使用新格式
+        secret_id = self.get("kuaidaili_secret_id", "")
+        secret_key = self.get("kuaidaili_secret_key", "")
+        if secret_id and secret_key:
+            return f"{secret_id}:{secret_key}"
+        # 兼容旧格式
         return self.get("kuaidaili_api_key", "")

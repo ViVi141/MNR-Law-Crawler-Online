@@ -22,6 +22,7 @@ from ..schemas.config import (
     TestResponse,
     CrawlerConfigResponse,
     CrawlerConfigUpdate,
+    KDLTestRequest,
 )
 from ..services.config_service import ConfigService
 
@@ -255,8 +256,24 @@ def get_data_sources(
             with open(config_file, "r", encoding="utf-8") as f:
                 config_data = json.load(f)
                 data_sources = config_data.get("data_sources", [])
+
+            # 确保包含广东省法规数据源（如果不存在则添加）
+            gd_source_exists = any(
+                ds.get("name") == "广东省法规" or ds.get("type") == "gd"
+                for ds in data_sources
+            )
+            if not gd_source_exists:
+                data_sources.append(
+                    {
+                        "name": "广东省法规",
+                        "type": "gd",
+                        "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
+                        "law_rule_types": [1, 2, 3],
+                        "enabled": False,
+                    }
+                )
         else:
-            # 使用默认数据源
+            # 使用默认数据源（包含广东省法规）
             data_sources = [
                 {
                     "name": "政府信息公开平台",
@@ -272,6 +289,17 @@ def get_data_sources(
                     "search_api": "https://search.mnr.gov.cn/was5/web/search",
                     "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
                     "channel_id": "174757",
+                    "enabled": False,
+                },
+                {
+                    "name": "广东省法规",
+                    "type": "gd",
+                    "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
+                    "law_rule_types": [
+                        1,
+                        2,
+                        3,
+                    ],  # 1=地方性法规, 2=政府规章, 3=规范性文件
                     "enabled": False,
                 },
             ]
@@ -311,3 +339,22 @@ def update_crawler_config(
     except Exception as e:
         logger.error(f"更新爬虫配置失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新爬虫配置失败: {str(e)}")
+
+
+@router.post("/crawler/test-kdl", response_model=TestResponse)
+def test_kdl_connection(
+    request: KDLTestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """测试快代理连接"""
+    try:
+        result = config_service.test_kdl_connection(
+            db, request.secret_id, request.secret_key
+        )
+        return TestResponse(**result)
+    except Exception as e:
+        logger.error(f"测试快代理连接失败: {e}", exc_info=True)
+        return TestResponse(
+            success=False, message=f"测试快代理连接失败: {str(e)}", error=str(e)
+        )

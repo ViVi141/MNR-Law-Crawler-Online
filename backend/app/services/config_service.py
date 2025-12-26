@@ -726,7 +726,7 @@ class ConfigService:
             msg = MIMEText(
                 f"这是一封测试邮件，发送时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            msg["Subject"] = "MNR Law Crawler - 测试邮件"
+            msg["Subject"] = "Policy Crawler Pro - 测试邮件"
             msg["From"] = test_config["from_address"]
             msg["To"] = to_address
 
@@ -816,6 +816,31 @@ class ConfigService:
         # 默认值
         default_delay = 0.5
         default_use_proxy = False
+        default_kuaidaili_secret_id = ""
+        default_kuaidaili_secret_key = ""
+        default_kuaidaili_api_key = ""
+
+        # 获取新格式的配置
+        secret_id = self.get_config_value(
+            db, "kuaidaili_secret_id", default_kuaidaili_secret_id, category="crawler"
+        )
+        secret_key = self.get_config_value(
+            db, "kuaidaili_secret_key", default_kuaidaili_secret_key, category="crawler"
+        )
+
+        # 兼容旧格式：如果新格式为空，尝试从旧格式解析
+        api_key = self.get_config_value(
+            db, "kuaidaili_api_key", default_kuaidaili_api_key, category="crawler"
+        )
+
+        # 如果新格式为空但旧格式有值，解析旧格式
+        if not secret_id and not secret_key and api_key and ":" in api_key:
+            try:
+                parts = api_key.split(":", 1)
+                secret_id = parts[0]
+                secret_key = parts[1] if len(parts) > 1 else ""
+            except Exception:
+                pass
 
         return {
             "request_delay": self.get_config_value(
@@ -823,6 +848,12 @@ class ConfigService:
             ),
             "use_proxy": self.get_config_value(
                 db, "use_proxy", default_use_proxy, category="crawler"
+            ),
+            "kuaidaili_secret_id": secret_id,
+            "kuaidaili_secret_key": secret_key,
+            # 兼容旧字段
+            "kuaidaili_api_key": (
+                f"{secret_id}:{secret_key}" if secret_id and secret_key else ""
             ),
         }
 
@@ -851,4 +882,105 @@ class ConfigService:
                 description="是否使用代理",
             )
 
+        # 处理新格式：secret_id 和 secret_key
+        if "kuaidaili_secret_id" in config:
+            secret_id = config["kuaidaili_secret_id"] or ""
+            self.set_config(
+                db,
+                "kuaidaili_secret_id",
+                secret_id,
+                category="crawler",
+                description="快代理SecretId",
+            )
+
+        if "kuaidaili_secret_key" in config:
+            secret_key = config["kuaidaili_secret_key"] or ""
+            self.set_config(
+                db,
+                "kuaidaili_secret_key",
+                secret_key,
+                category="crawler",
+                description="快代理SecretKey",
+            )
+
+        # 兼容旧格式：如果提供了旧格式的api_key，解析并保存为新格式
+        if "kuaidaili_api_key" in config:
+            api_key = config["kuaidaili_api_key"]
+            if api_key and api_key.strip():
+                if ":" in api_key:
+                    parts = api_key.split(":", 1)
+                    secret_id = parts[0].strip()
+                    secret_key = parts[1].strip() if len(parts) > 1 else ""
+                    self.set_config(
+                        db,
+                        "kuaidaili_secret_id",
+                        secret_id,
+                        category="crawler",
+                        description="快代理SecretId",
+                    )
+                    self.set_config(
+                        db,
+                        "kuaidaili_secret_key",
+                        secret_key,
+                        category="crawler",
+                        description="快代理SecretKey",
+                    )
+                else:
+                    raise ValueError(
+                        "快代理API密钥格式错误，需要 secret_id:secret_key 格式"
+                    )
+            # 同时保存旧格式（向后兼容）
+            self.set_config(
+                db,
+                "kuaidaili_api_key",
+                api_key if api_key else "",
+                category="crawler",
+                description="快代理API密钥（格式：secret_id:secret_key，已废弃）",
+            )
+
         return self.get_crawler_config(db)
+
+    def test_kdl_connection(
+        self, db: Session, secret_id: str, secret_key: str
+    ) -> Dict[str, Any]:
+        """测试快代理连接"""
+        try:
+            import kdl
+
+            if not secret_id or not secret_key:
+                return {
+                    "success": False,
+                    "message": "SecretId和SecretKey不能为空",
+                }
+
+            # 创建认证对象
+            auth = kdl.Auth(secret_id, secret_key)
+            client = kdl.Client(auth, timeout=(8, 12), max_retries=3)
+
+            # 尝试获取代理IP
+            proxy_list = client.get_dps(1, format="json")
+            if proxy_list and len(proxy_list) > 0:
+                proxy = proxy_list[0]
+                return {
+                    "success": True,
+                    "message": f"快代理连接测试成功，获取到代理IP: {proxy[:30]}...",
+                    "proxy": proxy,
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "快代理连接测试失败：无法获取代理IP",
+                }
+
+        except ImportError:
+            return {
+                "success": False,
+                "message": "快代理SDK未安装，请运行: pip install kdl",
+            }
+        except Exception as e:
+            logger.error(f"快代理连接测试失败: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"快代理连接测试失败: {str(e)}",
+                "error": str(e),
+            }

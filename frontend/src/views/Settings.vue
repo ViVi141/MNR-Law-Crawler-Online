@@ -183,10 +183,40 @@
         <el-form-item label="使用代理">
           <el-switch
             v-model="crawlerConfig.use_proxy"
-            disabled
           />
-          <span class="help-text">目标网站无防护，无需使用代理（功能已禁用）</span>
+          <span class="help-text">启用代理IP轮换，避免被限流（需要配置快代理API密钥）</span>
         </el-form-item>
+        <template v-if="crawlerConfig.use_proxy">
+          <el-form-item label="SecretId">
+            <el-input
+              v-model="crawlerConfig.kuaidaili_secret_id"
+              placeholder="请输入SecretId"
+              style="max-width: 400px"
+            />
+            <span class="help-text">快代理SecretId（从快代理官网获取）</span>
+          </el-form-item>
+          <el-form-item label="SecretKey">
+            <el-input
+              v-model="crawlerConfig.kuaidaili_secret_key"
+              type="password"
+              show-password
+              placeholder="请输入SecretKey"
+              style="max-width: 400px"
+            />
+            <span class="help-text">快代理SecretKey（从快代理官网获取）</span>
+          </el-form-item>
+          <el-form-item>
+            <el-button
+              type="primary"
+              :loading="kdlTesting"
+              :disabled="!crawlerConfig.kuaidaili_secret_id || !crawlerConfig.kuaidaili_secret_key"
+              @click="handleTestKDL"
+            >
+              {{ kdlTesting ? '测试中...' : '测试连接' }}
+            </el-button>
+            <span class="help-text">测试快代理连接是否正常</span>
+          </el-form-item>
+        </template>
       </el-form>
     </el-card>
 
@@ -344,7 +374,12 @@ const s3Config = reactive<S3ConfigUpdate>({
 const crawlerConfig = reactive({
   request_delay: 0.5,
   use_proxy: false,
+  kuaidaili_secret_id: '',
+  kuaidaili_secret_key: '',
+  kuaidaili_api_key: '', // 兼容旧字段
 })
+
+const kdlTesting = ref(false)
 
 const emailConfig = reactive<Omit<EmailConfigUpdate, 'to_addresses'> & { to_addresses: string }>({
   enabled: false,
@@ -752,6 +787,17 @@ const fetchCrawlerConfig = async () => {
     const config = await configApi.getCrawlerConfig()
     crawlerConfig.request_delay = config.request_delay || 0.5
     crawlerConfig.use_proxy = config.use_proxy || false
+    // 优先使用新格式
+    crawlerConfig.kuaidaili_secret_id = config.kuaidaili_secret_id || ''
+    crawlerConfig.kuaidaili_secret_key = config.kuaidaili_secret_key || ''
+    // 兼容旧格式
+    if (!crawlerConfig.kuaidaili_secret_id && !crawlerConfig.kuaidaili_secret_key && config.kuaidaili_api_key) {
+      const parts = config.kuaidaili_api_key.split(':')
+      if (parts.length >= 2) {
+        crawlerConfig.kuaidaili_secret_id = parts[0]
+        crawlerConfig.kuaidaili_secret_key = parts.slice(1).join(':')
+      }
+    }
   } catch (error) {
     const apiError = error as ApiError
     ElMessage.error(apiError.response?.data?.detail || '获取爬虫配置失败')
@@ -759,13 +805,24 @@ const fetchCrawlerConfig = async () => {
 }
 
 const handleSaveCrawler = async () => {
+  // 验证：如果启用代理，必须配置SecretId和SecretKey
+  if (crawlerConfig.use_proxy) {
+    if (!crawlerConfig.kuaidaili_secret_id?.trim() || !crawlerConfig.kuaidaili_secret_key?.trim()) {
+      ElMessage.warning('启用代理时必须配置SecretId和SecretKey')
+      return
+    }
+  }
+  
   crawlerSaving.value = true
   try {
     await configApi.updateCrawlerConfig({
       request_delay: crawlerConfig.request_delay,
-      use_proxy: false, // 始终禁用代理
+      use_proxy: crawlerConfig.use_proxy,
+      kuaidaili_secret_id: crawlerConfig.kuaidaili_secret_id || undefined,
+      kuaidaili_secret_key: crawlerConfig.kuaidaili_secret_key || undefined,
     })
     ElMessage.success('爬虫配置已保存')
+    await fetchCrawlerConfig()
   } catch (error) {
     const apiError = error as ApiError
     ElMessage.error(apiError.response?.data?.detail || '保存爬虫配置失败')
@@ -774,9 +831,36 @@ const handleSaveCrawler = async () => {
   }
 }
 
+const handleTestKDL = async () => {
+  if (!crawlerConfig.kuaidaili_secret_id?.trim() || !crawlerConfig.kuaidaili_secret_key?.trim()) {
+    ElMessage.warning('请先输入SecretId和SecretKey')
+    return
+  }
+  
+  kdlTesting.value = true
+  try {
+    const result = await configApi.testKDLConnection(
+      crawlerConfig.kuaidaili_secret_id.trim(),
+      crawlerConfig.kuaidaili_secret_key.trim()
+    )
+    if (result.success) {
+      ElMessage.success(result.message || '快代理连接测试成功')
+    } else {
+      ElMessage.error(result.message || '快代理连接测试失败')
+    }
+  } catch (error) {
+    const apiError = error as ApiError
+    ElMessage.error(apiError.response?.data?.detail || '快代理连接测试失败')
+  } finally {
+    kdlTesting.value = false
+  }
+}
+
 const handleResetCrawler = () => {
   crawlerConfig.request_delay = 0.5
   crawlerConfig.use_proxy = false
+  crawlerConfig.kuaidaili_secret_id = ''
+  crawlerConfig.kuaidaili_secret_key = ''
 }
 
 onMounted(() => {

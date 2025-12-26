@@ -63,7 +63,7 @@ def main():
     """主函数"""
     if len(sys.argv) < 2:
         print("=" * 60)
-        print("MNR Law Crawler - 密码重置工具")
+        print("Policy Crawler Pro - 密码重置工具")
         print("=" * 60)
         print()
         print("使用方法:")

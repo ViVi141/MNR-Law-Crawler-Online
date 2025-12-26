@@ -1,10 +1,10 @@
 <!--
 ==============================================================================
-MNR Law Crawler Online - 任务创建表单组件
+Policy Crawler Pro - 任务创建表单组件
 ==============================================================================
 
-项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+项目名称: Policy Crawler Pro (政策爬虫专业版)
+项目地址: https://github.com/ViVi141/policy-crawler-pro
 作者: ViVi141
 许可证: MIT License
 
@@ -120,7 +120,14 @@ MNR Law Crawler Online - 任务创建表单组件
               :disabled="false"
             >
               {{ source.name }}
-              <el-tag v-if="source.enabled" type="success" size="small" style="margin-left: 8px;">已启用</el-tag>
+              <el-tag 
+                v-if="crawlConfig.selectedDataSources.includes(source.name)" 
+                type="success" 
+                size="small" 
+                style="margin-left: 8px;"
+              >
+                已选择
+              </el-tag>
             </el-checkbox>
           </el-checkbox-group>
           <div class="help-text" style="margin-top: 8px; color: #909399; font-size: 12px;">
@@ -423,7 +430,23 @@ const handleDialogClosed = () => {
 const loadDataSources = async () => {
   try {
     const response = await configApi.getDataSources()
-    availableDataSources.value = response.data_sources
+    console.log('获取到的数据源列表:', response.data_sources)
+    
+    // 确保数据源列表包含所有字段
+    availableDataSources.value = response.data_sources.map((ds: any) => ({
+      name: ds.name,
+      base_url: ds.base_url,
+      search_api: ds.search_api,
+      ajax_api: ds.ajax_api,
+      channel_id: ds.channel_id,
+      enabled: ds.enabled ?? false,
+      // GD数据源特有字段
+      type: ds.type,
+      api_base_url: ds.api_base_url,
+      law_rule_types: ds.law_rule_types,
+    }))
+    
+    console.log('处理后的数据源列表:', availableDataSources.value)
 
     // 默认选择第一个启用的数据源（仅在创建模式且没有选择时）
     if (availableDataSources.value.length > 0 && crawlConfig.selectedDataSources.length === 0 && props.mode === 'create') {
@@ -434,8 +457,9 @@ const loadDataSources = async () => {
         crawlConfig.selectedDataSources = [availableDataSources.value[0].name]
       }
     }
-  } catch {
-    // 使用默认数据源
+  } catch (error) {
+    console.error('获取数据源列表失败:', error)
+    // 使用默认数据源（包含广东省法规）
     availableDataSources.value = [
       {
         name: '政府信息公开平台',
@@ -451,6 +475,13 @@ const loadDataSources = async () => {
         search_api: 'https://search.mnr.gov.cn/was5/web/search',
         ajax_api: 'https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp',
         channel_id: '174757',
+        enabled: false,
+      },
+      {
+        name: '广东省法规',
+        type: 'gd',
+        api_base_url: 'https://www.gdpc.gov.cn:443/bascdata',
+        law_rule_types: [1, 2, 3],
         enabled: false,
       },
     ]
@@ -606,23 +637,45 @@ const handleSubmit = async () => {
               const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
 
-              // 确保数据源包含所有必需字段
+              // 构建数据源配置，支持MNR和GD两种类型
               config.data_sources = filteredSources
                 .map((source: DataSourceConfig) => {
-                  const dataSource = {
-                    name: source.name,
-                    base_url: source.base_url,
-                    search_api: source.search_api,
-                    ajax_api: source.ajax_api,
-                    channel_id: source.channel_id || '',
-                    enabled: true
+                  // 判断数据源类型
+                  const isGD = source.type === 'gd' || source.name === '广东省法规'
+                  
+                  if (isGD) {
+                    // GD数据源配置
+                    const dataSource: DataSourceConfig = {
+                      name: source.name,
+                      type: 'gd',
+                      api_base_url: source.api_base_url || 'https://www.gdpc.gov.cn:443/bascdata',
+                      law_rule_types: source.law_rule_types || [1, 2, 3],
+                      enabled: true
+                    }
+                    // 验证GD数据源必需字段
+                    if (!dataSource.name || !dataSource.api_base_url) {
+                      throw new Error(`数据源 "${dataSource.name}" 缺少必需字段（GD数据源需要api_base_url）`)
+                    }
+                    return dataSource
+                  } else {
+                    // MNR数据源配置
+                    const dataSource: DataSourceConfig = {
+                      name: source.name,
+                      base_url: source.base_url || '',
+                      search_api: source.search_api || '',
+                      ajax_api: source.ajax_api || source.search_api || '',
+                      channel_id: source.channel_id || '',
+                      enabled: true
+                    }
+                    // 验证MNR数据源必需字段
+                    if (!dataSource.name || !dataSource.base_url || !dataSource.search_api || !dataSource.ajax_api) {
+                      throw new Error(`数据源 "${dataSource.name}" 缺少必需字段（MNR数据源需要base_url、search_api、ajax_api）`)
+                    }
+                    return dataSource
                   }
-                  // 验证必需字段
-                  if (!dataSource.name || !dataSource.base_url || !dataSource.search_api || !dataSource.ajax_api) {
-                    throw new Error(`数据源 "${dataSource.name}" 缺少必需字段`)
-                  }
-                  return dataSource
                 })
+              
+              console.log('定时任务 - 最终提交的数据源配置:', config.data_sources)
             } else {
               throw new Error('创建爬取任务时必须至少选择一个数据源')
             }
@@ -663,11 +716,16 @@ const handleSubmit = async () => {
               const filteredSources = availableDataSources.value
                 .filter((source: DataSourceConfig) => crawlConfig.selectedDataSources.includes(source.name))
 
+              console.log('选中的数据源名称:', crawlConfig.selectedDataSources)
+              console.log('过滤后的数据源:', filteredSources)
+
               config.data_sources = filteredSources
                 .map((source: DataSourceConfig) => ({
                   ...source,
                   enabled: true
                 }))
+              
+              console.log('最终提交的数据源配置:', config.data_sources)
             }
           } else {
             config = {

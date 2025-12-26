@@ -1,5 +1,5 @@
 """
-MNR Law Crawler Web - Backend Application
+Policy Crawler Pro - Backend Application
 """
 
-__version__ = "3.0.0"
+__version__ = "3.1.3"

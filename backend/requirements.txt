@@ -1,4 +1,4 @@
-# MNR Law Crawler Web - Backend Dependencies
+# Policy Crawler Pro - Backend Dependencies
 # 版本: 3.1.2
 
 # Web框架

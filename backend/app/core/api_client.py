@@ -78,27 +78,39 @@ class APIClient:
     def _init_proxy(self):
         """初始化代理"""
         if not self.config.use_proxy:
+            logger.debug("代理未启用（use_proxy=False）")
             return
 
-        api_key = self.config.kuaidaili_api_key
-        if not api_key:
+        # 优先使用新格式
+        secret_id = self.config.get("kuaidaili_secret_id", "")
+        secret_key = self.config.get("kuaidaili_secret_key", "")
+
+        # 如果新格式为空，尝试从旧格式解析
+        if not secret_id or not secret_key:
+            api_key = self.config.kuaidaili_api_key
+            if api_key and ":" in api_key:
+                try:
+                    parts = api_key.split(":", 1)
+                    secret_id = parts[0].strip()
+                    secret_key = parts[1].strip() if len(parts) > 1 else ""
+                except Exception:
+                    pass
+
+        if not secret_id or not secret_key:
+            logger.warning("代理已启用但未配置SecretId和SecretKey")
             return
 
         try:
             # 尝试导入快代理SDK
             import kdl
 
-            if ":" in api_key:
-                secret_id, secret_key = api_key.split(":", 1)
-                auth = kdl.Auth(secret_id, secret_key)
-                self.kuaidaili_client = kdl.Client(auth, timeout=(8, 12), max_retries=3)
-                print("[信息] 快代理已启用")
-            else:
-                print("[警告] 快代理API密钥格式错误，需要 secret_id:secret_key")
+            auth = kdl.Auth(secret_id, secret_key)
+            self.kuaidaili_client = kdl.Client(auth, timeout=(8, 12), max_retries=3)
+            logger.info("[快代理] 已成功初始化，代理IP轮换已启用")
         except ImportError:
-            print("[警告] 快代理SDK未安装: pip install kdl")
+            logger.warning("[快代理] SDK未安装，请运行: pip install kdl")
         except Exception as e:
-            print(f"[警告] 快代理初始化失败: {e}")
+            logger.error(f"[快代理] 初始化失败: {e}", exc_info=True)
 
     def _get_proxy(self, force_new: bool = False) -> Optional[Dict[str, str]]:
         """获取代理IP
@@ -112,23 +124,33 @@ class APIClient:
         if not self.config.use_proxy:
             return None
 
+        if not hasattr(self, "kuaidaili_client") or self.kuaidaili_client is None:
+            logger.debug("[代理] 快代理客户端未初始化，跳过代理")
+            return None
+
         if force_new or self.current_proxy is None:
             try:
-                if hasattr(self, "kuaidaili_client"):
-                    proxy_list = self.kuaidaili_client.get_dps(1, format="json")
-                    if proxy_list and len(proxy_list) > 0:
-                        self.current_proxy = proxy_list[0]
-                        print(f"  [代理] 获取新代理: {self.current_proxy[:50]}...")
+                proxy_list = self.kuaidaili_client.get_dps(1, format="json")
+                if proxy_list and len(proxy_list) > 0:
+                    self.current_proxy = proxy_list[0]
+                    logger.info(f"[代理] 获取新代理IP: {self.current_proxy[:50]}...")
+                else:
+                    logger.warning("[代理] 快代理返回空列表，无法获取代理IP")
+                    self.current_proxy = None
             except Exception as e:
                 if force_new:
-                    print(f"  [警告] 获取代理失败: {e}")
+                    logger.warning(f"[代理] 获取代理失败: {e}")
+                else:
+                    logger.debug(f"[代理] 获取代理失败（非强制）: {e}")
                 self.current_proxy = None
 
         if self.current_proxy:
-            return {
+            proxy_dict = {
                 "http": f"http://{self.current_proxy}",
                 "https": f"http://{self.current_proxy}",
             }
+            logger.debug(f"[代理] 使用代理: {self.current_proxy[:30]}...")
+            return proxy_dict
 
         return None
 

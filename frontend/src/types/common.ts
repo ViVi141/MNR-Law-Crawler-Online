@@ -13,11 +13,15 @@ export type ApiError = AxiosError<ApiErrorResponse>
 // 数据源配置类型
 export interface DataSourceConfig {
   name: string
-  base_url: string
-  search_api: string
-  ajax_api: string
-  channel_id: string
+  base_url?: string
+  search_api?: string
+  ajax_api?: string
+  channel_id?: string
   enabled: boolean
+  // 广东省法规数据源特有字段
+  type?: string
+  api_base_url?: string
+  law_rule_types?: number[]
 }
 
 // 任务配置类型

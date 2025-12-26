@@ -903,14 +903,30 @@ class SchedulerService:
                 for idx, ds in enumerate(data_sources):
                     if not isinstance(ds, dict):
                         raise ValueError(f"数据源配置格式错误（索引 {idx}）: {ds}")
-                    required_fields = ["name", "base_url", "search_api", "ajax_api"]
-                    missing_fields = [
-                        f for f in required_fields if f not in ds or not ds.get(f)
-                    ]
-                    if missing_fields:
-                        raise ValueError(
-                            f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
-                        )
+
+                    # 判断数据源类型
+                    is_gd = ds.get("type") == "gd" or "广东" in ds.get("name", "")
+
+                    if is_gd:
+                        # GD数据源验证
+                        required_fields = ["name", "api_base_url"]
+                        missing_fields = [
+                            f for f in required_fields if f not in ds or not ds.get(f)
+                        ]
+                        if missing_fields:
+                            raise ValueError(
+                                f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
+                            )
+                    else:
+                        # MNR数据源验证
+                        required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                        missing_fields = [
+                            f for f in required_fields if f not in ds or not ds.get(f)
+                        ]
+                        if missing_fields:
+                            raise ValueError(
+                                f"数据源 '{ds.get('name', f'索引{idx}')}' 缺少必需字段: {', '.join(missing_fields)}"
+                            )
             scheduled_task.config_json = config
         if is_enabled is not None:
             # 处理启用/禁用状态变更

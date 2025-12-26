@@ -1,10 +1,10 @@
 <!--
 ==============================================================================
-MNR Law Crawler Online - 关于页面
+Policy Crawler Pro - 关于页面
 ==============================================================================
 
-项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+项目名称: Policy Crawler Pro (政策爬虫专业版)
+项目地址: https://github.com/ViVi141/policy-crawler-pro
 作者: ViVi141
 许可证: MIT License
 
@@ -16,10 +16,10 @@ MNR Law Crawler Online - 关于页面
   <div class="about-page">
     <div class="hero-section">
       <div class="hero-content">
-        <h1 class="project-title">MNR Law Crawler Online</h1>
-        <p class="project-subtitle">自然资源部法规爬虫系统 - Web版</p>
+        <h1 class="project-title">Policy Crawler Pro</h1>
+        <p class="project-subtitle">政策爬虫专业版</p>
         <div class="version-badge">
-          <el-tag type="success" size="large">v3.0.0</el-tag>
+          <el-tag type="success" size="large">v3.1.3</el-tag>
         </div>
       </div>
       <div class="hero-image">
@@ -233,10 +233,10 @@ MNR Law Crawler Online - 关于页面
             </div>
           </template>
           <div class="project-info">
-            <p><strong>项目名称：</strong>MNR Law Crawler Online</p>
-            <p><strong>版本：</strong>v3.0.0</p>
+            <p><strong>项目名称：</strong>Policy Crawler Pro</p>
+            <p><strong>版本：</strong>v3.1.3</p>
             <p><strong>许可证：</strong>MIT License</p>
-            <p><strong>发布日期：</strong>2025-12-13</p>
+            <p><strong>发布日期：</strong>2025-12-26</p>
           </div>
         </el-card>
 
@@ -249,19 +249,19 @@ MNR Law Crawler Online - 关于页面
           </template>
           <div class="links-info">
             <p>
-              <el-link href="https://github.com/ViVi141/MNR-Law-Crawler-Online" target="_blank" type="primary">
+              <el-link href="https://github.com/ViVi141/policy-crawler-pro" target="_blank" type="primary">
                 <el-icon><Link /></el-icon>
                 项目主页
               </el-link>
             </p>
             <p>
-              <el-link href="https://github.com/ViVi141/MNR-Law-Crawler-Online/blob/main/README.md" target="_blank" type="primary">
+              <el-link href="https://github.com/ViVi141/Policy-Crawler-Pro/blob/main/README.md" target="_blank" type="primary">
                 <el-icon><Document /></el-icon>
                 项目文档
               </el-link>
             </p>
             <p>
-              <el-link href="https://github.com/ViVi141/MNR-Law-Crawler-Online/issues" target="_blank" type="primary">
+              <el-link href="https://github.com/ViVi141/Policy-Crawler-Pro/issues" target="_blank" type="primary">
                 <el-icon><Warning /></el-icon>
                 问题反馈
               </el-link>
@@ -301,7 +301,7 @@ MNR Law Crawler Online - 关于页面
                 <strong>如果您喜欢这个项目，请到GitHub原项目点个STAR！</strong>
               </p>
               <el-link
-                href="https://github.com/ViVi141/MNR-Law-Crawler-Online"
+                href="https://github.com/ViVi141/Policy-Crawler-Pro"
                 target="_blank"
                 type="primary"
                 class="github-link"

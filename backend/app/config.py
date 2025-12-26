@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     """应用配置"""
 
     # 应用配置
-    app_name: str = "MNR Law Crawler Web"
-    app_version: str = "3.0.0"
+    app_name: str = "Policy Crawler Pro"
+    app_version: str = "3.1.3"
     debug: bool = Field(default=False, env="DEBUG")
 
     # 数据库配置

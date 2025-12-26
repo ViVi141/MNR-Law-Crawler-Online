@@ -8,7 +8,7 @@ if __name__ == "__main__":
     import uvicorn
 
     print("=" * 60)
-    print("MNR Law Crawler Web - 启动中...")
+    print("Policy Crawler Pro - 启动中...")
     print("=" * 60)
     print("\n访问地址:")
     print("  - API文档: http://localhost:8000/docs")

@@ -1,9 +1,9 @@
 # ==============================================================================
-# MNR Law Crawler Online - 任务服务
+# Policy Crawler Pro - 任务服务
 # ==============================================================================
 #
-# 项目名称: MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
-# 项目地址: https://github.com/ViVi141/MNR-Law-Crawler-Online
+# 项目名称: Policy Crawler Pro (政策爬虫专业版)
+# 项目地址: https://github.com/ViVi141/policy-crawler-pro
 # 作者: ViVi141
 # 许可证: MIT License
 #
@@ -71,14 +71,30 @@ class TaskService:
             for ds in data_sources:
                 if not isinstance(ds, dict):
                     raise ValueError(f"数据源配置格式错误: {ds}")
-                required_fields = ["name", "base_url", "search_api", "ajax_api"]
-                missing_fields = [
-                    f for f in required_fields if f not in ds or not ds.get(f)
-                ]
-                if missing_fields:
-                    raise ValueError(
-                        f"数据源 '{ds.get('name', 'unknown')}' 缺少必需字段: {', '.join(missing_fields)}"
-                    )
+
+                # 判断数据源类型
+                is_gd = ds.get("type") == "gd" or "广东" in ds.get("name", "")
+
+                if is_gd:
+                    # GD数据源验证
+                    required_fields = ["name", "api_base_url"]
+                    missing_fields = [
+                        f for f in required_fields if f not in ds or not ds.get(f)
+                    ]
+                    if missing_fields:
+                        raise ValueError(
+                            f"数据源 '{ds.get('name', 'unknown')}' 缺少必需字段: {', '.join(missing_fields)}"
+                        )
+                else:
+                    # MNR数据源验证
+                    required_fields = ["name", "base_url", "search_api", "ajax_api"]
+                    missing_fields = [
+                        f for f in required_fields if f not in ds or not ds.get(f)
+                    ]
+                    if missing_fields:
+                        raise ValueError(
+                            f"数据源 '{ds.get('name', 'unknown')}' 缺少必需字段: {', '.join(missing_fields)}"
+                        )
 
         task = Task(
             task_name=task_name,
@@ -611,6 +627,10 @@ class TaskService:
                     ]
                 if crawler_db_config.get("use_proxy") is not None:
                     crawler_config.config["use_proxy"] = crawler_db_config["use_proxy"]
+                if crawler_db_config.get("kuaidaili_api_key") is not None:
+                    crawler_config.config["kuaidaili_api_key"] = crawler_db_config[
+                        "kuaidaili_api_key"
+                    ]
 
                 # 处理任务配置：合并到默认配置中（而不是直接覆盖）
                 # 需要保留默认配置中的重要字段（如 output_dir、log_dir 等）
@@ -621,32 +641,59 @@ class TaskService:
                     # 验证数据源配置完整性，确保包含所有必需字段
                     validated_data_sources = []
                     for ds in task_config["data_sources"]:
-                        # 确保数据源配置包含所有必需字段
-                        validated_ds = {
-                            "name": ds.get("name", ""),
-                            "base_url": ds.get("base_url", ""),
-                            "search_api": ds.get("search_api", ""),
-                            "ajax_api": ds.get(
-                                "ajax_api", ds.get("search_api", "")
-                            ),  # 如果没有ajax_api，使用search_api
-                            "channel_id": ds.get("channel_id", ""),
-                            "enabled": ds.get("enabled", True),
-                        }
-                        # 验证必需字段
-                        required_fields = [
-                            "name",
-                            "base_url",
-                            "search_api",
-                            "channel_id",
-                        ]
-                        missing_fields = [
-                            f for f in required_fields if not validated_ds.get(f)
-                        ]
-                        if missing_fields:
-                            logger.warning(
-                                f"[任务 {task_id}] 数据源 '{validated_ds.get('name')}' 缺少必需字段: {missing_fields}，跳过该数据源"
-                            )
-                            continue
+                        # 判断数据源类型
+                        is_gd = ds.get("type") == "gd" or "广东" in ds.get("name", "")
+
+                        if is_gd:
+                            # GD数据源配置
+                            validated_ds = {
+                                "name": ds.get("name", ""),
+                                "type": "gd",
+                                "api_base_url": ds.get(
+                                    "api_base_url",
+                                    "https://www.gdpc.gov.cn:443/bascdata",
+                                ),
+                                "law_rule_types": ds.get("law_rule_types", [1, 2, 3]),
+                                "enabled": ds.get("enabled", True),
+                            }
+                            # 验证GD数据源必需字段
+                            required_fields = ["name", "api_base_url"]
+                            missing_fields = [
+                                f for f in required_fields if not validated_ds.get(f)
+                            ]
+                            if missing_fields:
+                                logger.warning(
+                                    f"[任务 {task_id}] 数据源 '{validated_ds.get('name')}' 缺少必需字段: {missing_fields}，跳过该数据源"
+                                )
+                                continue
+                        else:
+                            # MNR数据源配置
+                            validated_ds = {
+                                "name": ds.get("name", ""),
+                                "base_url": ds.get("base_url", ""),
+                                "search_api": ds.get("search_api", ""),
+                                "ajax_api": ds.get(
+                                    "ajax_api", ds.get("search_api", "")
+                                ),  # 如果没有ajax_api，使用search_api
+                                "channel_id": ds.get("channel_id", ""),
+                                "enabled": ds.get("enabled", True),
+                            }
+                            # 验证MNR数据源必需字段
+                            required_fields = [
+                                "name",
+                                "base_url",
+                                "search_api",
+                                "channel_id",
+                            ]
+                            missing_fields = [
+                                f for f in required_fields if not validated_ds.get(f)
+                            ]
+                            if missing_fields:
+                                logger.warning(
+                                    f"[任务 {task_id}] 数据源 '{validated_ds.get('name')}' 缺少必需字段: {missing_fields}，跳过该数据源"
+                                )
+                                continue
+
                         validated_data_sources.append(validated_ds)
 
                     if not validated_data_sources:

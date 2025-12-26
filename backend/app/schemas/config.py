@@ -112,6 +112,13 @@ class CrawlerConfigResponse(BaseModel):
 
     request_delay: float = Field(0.5, description="爬取延迟（秒）")
     use_proxy: bool = Field(False, description="是否使用代理")
+    kuaidaili_secret_id: Optional[str] = Field(None, description="快代理SecretId")
+    kuaidaili_secret_key: Optional[str] = Field(None, description="快代理SecretKey")
+    # 兼容旧字段（向后兼容）
+    kuaidaili_api_key: Optional[str] = Field(
+        None,
+        description="快代理API密钥（格式：secret_id:secret_key，已废弃，使用secret_id和secret_key）",
+    )
 
 
 class CrawlerConfigUpdate(BaseModel):
@@ -121,3 +128,17 @@ class CrawlerConfigUpdate(BaseModel):
         None, ge=0, description="爬取延迟（秒），最小值0"
     )
     use_proxy: Optional[bool] = Field(None, description="是否使用代理")
+    kuaidaili_secret_id: Optional[str] = Field(None, description="快代理SecretId")
+    kuaidaili_secret_key: Optional[str] = Field(None, description="快代理SecretKey")
+    # 兼容旧字段（向后兼容）
+    kuaidaili_api_key: Optional[str] = Field(
+        None,
+        description="快代理API密钥（格式：secret_id:secret_key，已废弃，使用secret_id和secret_key）",
+    )
+
+
+class KDLTestRequest(BaseModel):
+    """快代理测试请求"""
+
+    secret_id: str = Field(..., description="SecretId")
+    secret_key: str = Field(..., description="SecretKey")

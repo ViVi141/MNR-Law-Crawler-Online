@@ -1,17 +1,17 @@
-# MNR Law Crawler Online (自然资源部法规爬虫系统 - Web版)
+# Policy Crawler Pro (政策爬虫专业版)
 
-[![CI/CD Pipeline](https://github.com/ViVi141/mnr-law-crawler-online/actions/workflows/ci.yml/badge.svg)](https://github.com/ViVi141/mnr-law-crawler-online/actions/workflows/ci.yml)
-[![Docker Compose Test](https://github.com/ViVi141/mnr-law-crawler-online/actions/workflows/docker-compose.yml/badge.svg)](https://github.com/ViVi141/mnr-law-crawler-online/actions/workflows/docker-compose.yml)
+[![CI/CD Pipeline](https://github.com/ViVi141/Policy-Crawler-Pro/actions/workflows/ci.yml/badge.svg)](https://github.com/ViVi141/Policy-Crawler-Pro/actions/workflows/ci.yml)
+[![Docker Compose Test](https://github.com/ViVi141/Policy-Crawler-Pro/actions/workflows/docker-compose.yml/badge.svg)](https://github.com/ViVi141/Policy-Crawler-Pro/actions/workflows/docker-compose.yml)
 
 > **Web化政策法规库管理系统** - 集爬取、存储、搜索、管理于一体的现代化政策法规库系统
 
-**English**: MNR Law Crawler Online | **中文**: 自然资源部法规爬虫系统（Web版）
+**English**: Policy Crawler Pro | **中文**: 政策爬虫专业版
 
 ## 📌 项目说明
 
-这是一个全新的Web应用项目，用于管理和爬取自然资源部政策法规数据。项目采用了现代化的前后端分离架构，提供了完整的政策法规库管理功能。
+这是一个全新的Web应用项目，用于管理和爬取多数据源的政策法规数据。项目采用了现代化的前后端分离架构，提供了完整的政策法规库管理功能。
 
-> **注意**：本项目的爬虫核心逻辑来自原 [mnr-law-crawler](https://github.com/ViVi141/mnr-law-crawler) 项目，但整体架构、功能设计和实现都是全新的。
+> **注意**：本项目支持多个数据源，包括自然资源部政府信息公开平台、政策法规库以及广东省法规等。整体架构、功能设计和实现都是全新的。
 
 ## 📢 项目声明
 
@@ -41,7 +41,7 @@
 
 ### ⭐ 项目支持
 **如果您喜欢这个项目，请到GitHub原项目点个STAR！**
-- 项目地址：[https://github.com/ViVi141/MNR-Law-Crawler-Online](https://github.com/ViVi141/MNR-Law-Crawler-Online)
+- 项目地址：[https://github.com/ViVi141/policy-crawler-pro](https://github.com/ViVi141/policy-crawler-pro)
 - 点击右上角的⭐ Star按钮支持我们
 
 ### ⚠️ 重要声明
@@ -130,7 +130,7 @@
 ## 📦 项目结构
 
 ```
-MNR-Law-Crawler-Online/
+Policy-Crawler-Pro/
 ├── backend/                 # 后端服务
 │   ├── app/
 │   │   ├── api/            # API路由
@@ -169,8 +169,8 @@ MNR-Law-Crawler-Online/
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/ViVi141/mnr-law-crawler-online.git
-cd MNR-Law-Crawler-Online
+git clone https://github.com/ViVi141/Policy-Crawler-Pro.git
+cd Policy-Crawler-Pro
 
 # 2. 启动所有服务（自动生成所有密钥）
 docker-compose up -d --build
@@ -603,18 +603,17 @@ docker-compose build backend 2>&1 | tee backend-build.log
 - **GitHub**: [@ViVi141](https://github.com/ViVi141)
 - **邮箱**: 747384120@qq.com
 
-**项目名称**: MNR-Law-Crawler-Online  
-**英文全称**: MNR Law Crawler Online  
-**中文名称**: 自然资源部法规爬虫系统（Web版）  
+**项目名称**: Policy-Crawler-Pro  
+**英文全称**: Policy Crawler Pro  
+**中文名称**: 政策爬虫专业版  
 **项目类型**: 全新Web应用项目  
-**爬虫核心**: 基于原 [mnr-law-crawler](https://github.com/ViVi141/mnr-law-crawler) 项目的爬虫逻辑
+**数据源支持**: 支持多个数据源，包括自然资源部政府信息公开平台、政策法规库、广东省法规等
 
 ---
 
-**版本**: 3.1.2  
-**最后更新**: 2025-12-24 
-**项目主页**: https://github.com/ViVi141/mnr-law-crawler-online  
-**原爬虫项目**: https://github.com/ViVi141/mnr-law-crawler
+**版本**: 3.1.3  
+**最后更新**: 2025-12-26 
+**项目主页**: https://github.com/ViVi141/policy-crawler-pro
 
 ## 📝 更新日志
 
@@ -919,7 +918,7 @@ docker-compose build backend 2>&1 | tee backend-build.log
 ### 原爬虫项目
 本项目使用的爬虫核心逻辑来自：
 
-**[mnr-law-crawler](https://github.com/ViVi141/mnr-law-crawler)** - 原GUI/CLI版本的爬虫工具
+**Policy Crawler Pro** - 多数据源政策爬虫专业版
 - 提供了成熟的爬虫核心逻辑
 - 包含多数据源支持和HTML解析器
 - 包含智能内容清洗和元信息提取功能
@@ -927,8 +926,7 @@ docker-compose build backend 2>&1 | tee backend-build.log
 
 ### 项目关系
 
-- **mnr-law-crawler**: 原项目，提供爬虫核心逻辑（GUI/CLI工具）
-- **mnr-law-crawler-online**: 本项目，基于原爬虫逻辑构建的Web应用系统（全新项目）
+- **Policy Crawler Pro**: 本项目，支持多数据源的政策爬虫Web应用系统
 
 ## 🤝 贡献
 
@@ -947,20 +945,20 @@ docker-compose build backend 2>&1 | tee backend-build.log
 
 所有 Docker 镜像已发布到 GitHub Container Registry：
 
-- `ghcr.io/vivi141/mnr-law-crawler-online-backend:latest`
-- `ghcr.io/vivi141/mnr-law-crawler-online-frontend:latest`
-- `ghcr.io/vivi141/mnr-law-crawler-online-db:latest`
+- `ghcr.io/vivi141/policy-crawler-pro-backend:latest`
+- `ghcr.io/vivi141/policy-crawler-pro-frontend:latest`
+- `ghcr.io/vivi141/policy-crawler-pro-db:latest`
 
 ### 使用发布的镜像
 
 ```bash
 # 拉取最新镜像
-docker pull ghcr.io/vivi141/mnr-law-crawler-online-backend:latest
-docker pull ghcr.io/vivi141/mnr-law-crawler-online-frontend:latest
-docker pull ghcr.io/vivi141/mnr-law-crawler-online-db:latest
+docker pull ghcr.io/vivi141/policy-crawler-pro-backend:latest
+docker pull ghcr.io/vivi141/policy-crawler-pro-frontend:latest
+docker pull ghcr.io/vivi141/policy-crawler-pro-db:latest
 
 # 或使用特定版本
-docker pull ghcr.io/vivi141/mnr-law-crawler-online-backend:v3.0.0
+docker pull ghcr.io/vivi141/policy-crawler-pro-backend:v3.1.3
 ```
 
 ### GitHub 自动发布与部署
@@ -977,4 +975,4 @@ docker pull ghcr.io/vivi141/mnr-law-crawler-online-backend:v3.0.0
 
 ---
 
-**感谢使用 MNR Law Crawler！** 🎉
+**感谢使用 Policy Crawler Pro！** 🎉
