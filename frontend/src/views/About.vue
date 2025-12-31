@@ -19,7 +19,7 @@ Policy Crawler Pro - 关于页面
         <h1 class="project-title">Policy Crawler Pro</h1>
         <p class="project-subtitle">政策爬虫专业版</p>
         <div class="version-badge">
-          <el-tag type="success" size="large">v3.1.3</el-tag>
+          <el-tag type="success" size="large">{{ appVersion }}</el-tag>
         </div>
       </div>
       <div class="hero-image">
@@ -234,7 +234,7 @@ Policy Crawler Pro - 关于页面
           </template>
           <div class="project-info">
             <p><strong>项目名称：</strong>Policy Crawler Pro</p>
-            <p><strong>版本：</strong>v3.1.3</p>
+            <p><strong>版本：</strong>{{ appVersion }}</p>
             <p><strong>许可证：</strong>MIT License</p>
             <p><strong>发布日期：</strong>2025-12-26</p>
           </div>
@@ -387,6 +387,7 @@ Policy Crawler Pro - 关于页面
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import {
   InfoFilled,
   Star,
@@ -407,6 +408,21 @@ import {
   TopRight,
   Reading,
 } from '@element-plus/icons-vue'
+import apiClient from '../api/client'
+
+// 版本号从后端API获取
+const appVersion = ref('v3.1.3') // 默认值，如果API获取失败则使用此值
+
+onMounted(async () => {
+  try {
+    const response = await apiClient.get('/')
+    if (response.data && response.data.version) {
+      appVersion.value = `v${response.data.version}`
+    }
+  } catch {
+    // 如果获取失败，使用默认值
+  }
+})
 </script>
 
 <style lang="scss" scoped>

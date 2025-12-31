@@ -49,9 +49,9 @@
         <el-table-column prop="is_enabled" label="状态" width="100">
           <template #default="{ row }">
             <el-switch
-              v-model="row.is_enabled"
+              :model-value="row.is_enabled"
               :loading="row._toggling"
-              @change="handleToggle(row)"
+              @update:model-value="handleToggle(row, $event)"
             />
           </template>
         </el-table-column>
@@ -180,6 +180,8 @@ const fetchTasks = async () => {
     // 将ScheduledTaskListItem转换为ScheduledTask格式
     scheduledTasks.value = response.items.map((task: ScheduledTaskListItem) => ({
       ...task,
+      // 确保 is_enabled 是明确的布尔值，避免 undefined 导致的闪烁
+      is_enabled: task.is_enabled === true,
       config_json: (task as ScheduledTask).config_json || {},
       _toggling: false,
     }))
@@ -201,16 +203,38 @@ const handlePageChange = () => {
   fetchTasks()
 }
 
-const handleToggle = async (task: ScheduledTask & { _toggling: boolean }) => {
+const handleToggle = async (task: ScheduledTask & { _toggling: boolean }, newValue: boolean) => {
+  // 如果正在切换中，忽略新的切换请求
+  if (task._toggling) {
+    return
+  }
+  
+  // 如果新值和当前值相同，不需要操作
+  if (task.is_enabled === newValue) {
+    return
+  }
+  
   task._toggling = true
   const oldEnabled = task.is_enabled
+  
+  // 乐观更新：立即更新UI状态
+  task.is_enabled = newValue
+  
   try {
-    await scheduledTasksApi.toggleScheduledTask(task.id, task.is_enabled)
-    ElMessage.success(task.is_enabled ? '任务已启用' : '任务已禁用')
-    // 重新获取任务列表以同步状态
-    await fetchTasks()
+    const updatedTask = await scheduledTasksApi.toggleScheduledTask(task.id, newValue)
+    ElMessage.success(newValue ? '任务已启用' : '任务已禁用')
+    
+    // 使用API返回的数据更新当前任务，而不是重新获取整个列表
+    // 这样可以避免列表刷新导致的闪烁
+    Object.assign(task, {
+      is_enabled: updatedTask.is_enabled,
+      next_run_time: updatedTask.next_run_time,
+      last_run_time: updatedTask.last_run_time,
+      last_run_status: updatedTask.last_run_status,
+    })
+    
     // 如果启用了任务但调度器未启用，更新调度器状态提示
-    if (task.is_enabled && !schedulerEnabled.value) {
+    if (newValue && !schedulerEnabled.value) {
       await checkSchedulerStatus(false)
     }
   } catch (error) {

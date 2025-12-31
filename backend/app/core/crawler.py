@@ -675,6 +675,16 @@ class PolicyCrawler:
                         stop_callback=stop_check,
                         policy_callback=None,
                     )
+                except Exception as gd_error:
+                    # 捕获广东省数据源爬取时的异常，记录日志并重新抛出，让上层处理
+                    error_msg = f"广东省数据源爬取异常: {str(gd_error)}"
+                    logger.error(
+                        f"数据源 {source_name} 爬取失败: {gd_error}", exc_info=True
+                    )
+                    if callback:
+                        callback(f"[错误] {error_msg}")
+                    # 重新抛出异常，让上层任务服务能够捕获并更新任务状态
+                    raise Exception(error_msg) from gd_error
                 finally:
                     # 恢复原始 max_pages
                     spider.max_pages = original_max_pages
@@ -753,16 +763,14 @@ class PolicyCrawler:
                     )
             except Exception as e:
                 # 捕获异常，记录错误但继续处理下一个数据源
-                error_msg = f"数据源 {source_name} 爬取失败: {str(e)}"
+                error_msg = f"数据源 {source_name} 处理政策列表失败: {str(e)}"
                 if callback:
                     callback(f"[错误] {error_msg}")
-                logger.error(f"数据源 {source_name} 爬取异常: {e}", exc_info=True)
-
-                # 记录数据源级别的失败（如果获取到政策但爬取失败）
-                # 使用logger记录失败信息
-                logger.error(f"数据源 {source_name} 爬取失败: {error_msg}")
+                logger.error(
+                    f"数据源 {source_name} 处理政策列表异常: {e}", exc_info=True
+                )
                 # 继续处理下一个数据源，不中断整个流程
-                policies = []  # 确保policies变量已定义
+                # 注意：policies变量已在try块外定义，这里不需要重新赋值
 
         if callback:
             callback(f"\n所有数据源爬取完成，总计 {len(all_policies)} 条政策（已去重）")
@@ -1153,6 +1161,7 @@ class PolicyCrawler:
             file_number = self._get_next_file_number()
 
             # 4. 下载附件（如果启用）
+            # 注意：所有数据源（包括广东省）都需要保存附件文件，以便用户可以下载
             if self.config.get("save_files", True) and attachments:
                 self._download_attachments(policy, attachments, file_number, callback)
 
@@ -1541,9 +1550,36 @@ class PolicyCrawler:
         if not safe_title:
             safe_title = f"政策_{policy.id[:8]}"
 
+        # 检查数据源类型，确定使用哪个API客户端下载附件
+        data_source = getattr(policy, "_data_source", None)
+        source_name = data_source.get("name", "") if data_source else ""
+        is_gd_source = "广东" in source_name or (
+            data_source and data_source.get("type") == "gd"
+        )
+
+        # 如果是广东省数据源，需要创建GD API客户端
+        gd_api_client = None
+        if is_gd_source:
+            try:
+                from .gd_api_client import GDAPIClient
+
+                temp_config = Config()
+                temp_config.config = self.config.config.copy()
+                if data_source:
+                    temp_config.config["api_base_url"] = data_source.get(
+                        "api_base_url", "https://www.gdpc.gov.cn:443/bascdata"
+                    )
+                temp_config.config["use_proxy"] = self.config.get("use_proxy", False)
+                temp_config.config["kuaidaili_api_key"] = self.config.get(
+                    "kuaidaili_api_key", ""
+                )
+                gd_api_client = GDAPIClient(temp_config)
+            except Exception as e:
+                logger.warning(f"创建GD API客户端失败: {e}")
+
         for i, att in enumerate(target_files, 1):
-            url = att.get("url", "")
-            name = att.get("name", "")
+            url = att.get("url", "") or att.get("file_url", "")
+            name = att.get("name", "") or att.get("file_name", "")
 
             if callback:
                 callback(f"\n  [{i}/{len(target_files)}] 下载: {name or url}")
@@ -1609,8 +1645,20 @@ class PolicyCrawler:
 
             save_path = f"{self.config.output_dir}/files/{save_filename}"
 
-            # 下载文件
-            if self.api_client.download_file(url, save_path):
+            # 下载文件（根据数据源类型选择不同的下载方法）
+            download_success = False
+            if is_gd_source and gd_api_client:
+                # 广东省数据源：使用GD API客户端下载（file_url是文件路径，不是完整URL）
+                try:
+                    download_success = gd_api_client.download_file(url, save_path)
+                except Exception as e:
+                    logger.error(f"使用GD API客户端下载附件失败: {e}")
+                    download_success = False
+            else:
+                # 其他数据源：使用MNR API客户端下载
+                download_success = self.api_client.download_file(url, save_path)
+
+            if download_success:
                 if callback:
                     callback(f"    [OK] 下载成功: {save_filename}")
                 logger.debug(f"附件下载成功: {save_path}")
@@ -1633,6 +1681,13 @@ class PolicyCrawler:
             # 下载间隔
             if i < len(target_files):
                 time.sleep(0.3)
+
+        # 清理GD API客户端
+        if gd_api_client and hasattr(gd_api_client, "close"):
+            try:
+                gd_api_client.close()
+            except Exception:
+                pass
 
     def crawl_batch(
         self,

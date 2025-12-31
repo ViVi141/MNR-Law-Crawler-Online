@@ -670,6 +670,145 @@ def download_task_files(
         raise HTTPException(status_code=500, detail=f"下载任务文件失败: {str(e)}")
 
 
+@router.get("/{task_id}/download-attachments")
+def download_task_attachments(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下载任务的所有附件（打包成zip）
+
+    Args:
+        task_id: 任务ID
+
+    Returns:
+        ZIP文件流
+    """
+    try:
+        # 获取任务
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        # 获取任务关联的所有政策
+        task_policies = db.query(TaskPolicy).filter(TaskPolicy.task_id == task_id).all()
+        if not task_policies:
+            raise HTTPException(status_code=404, detail="该任务没有关联的政策")
+
+        policy_ids = [tp.policy_id for tp in task_policies]
+
+        # 获取所有附件
+        from ..models.attachment import Attachment
+
+        attachments = (
+            db.query(Attachment).filter(Attachment.policy_id.in_(policy_ids)).all()
+        )
+
+        if not attachments:
+            raise HTTPException(status_code=404, detail="该任务没有附件")
+
+        # 初始化存储服务
+        storage_service = StorageService()
+
+        # 创建临时ZIP文件路径
+        import tempfile
+        import zipfile
+        import io
+
+        temp_zip_fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
+        os.close(temp_zip_fd)
+
+        try:
+            with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                files_added = 0
+
+                for attachment in attachments:
+                    file_path = None
+
+                    # 尝试获取文件路径
+                    if attachment.file_path and os.path.exists(attachment.file_path):
+                        file_path = attachment.file_path
+                    elif attachment.file_s3_key:
+                        # 从S3下载
+                        file_path = storage_service.get_attachment_file_path(
+                            attachment.policy_id, attachment.file_name, task_id=task_id
+                        )
+
+                    if file_path and os.path.exists(file_path):
+                        # 获取政策信息（用于组织文件夹结构）
+                        policy = (
+                            db.query(Policy)
+                            .filter(Policy.id == attachment.policy_id)
+                            .first()
+                        )
+                        if policy:
+                            # 使用政策标题作为文件夹名
+                            policy_title = (
+                                policy.title.replace("/", "_")
+                                .replace("\\", "_")
+                                .replace(":", "_")
+                            )
+                            safe_title = "".join(
+                                c
+                                for c in policy_title
+                                if c.isalnum()
+                                or c in (" ", "-", "_", "(", ")", "（", "）")
+                            )[:100]
+                            # 在zip中组织文件夹结构：政策标题/附件文件名
+                            arcname = f"{safe_title}/{attachment.file_name}"
+                        else:
+                            arcname = attachment.file_name
+
+                        # 确保文件名不重复
+                        if files_added > 0:
+                            base, ext = os.path.splitext(arcname)
+                            arcname = f"{base}_{files_added + 1}{ext}"
+
+                        zip_file.write(file_path, arcname)
+                        files_added += 1
+                        logger.debug(f"添加附件到zip: {arcname}")
+                    else:
+                        logger.warning(f"附件文件不存在: {attachment.file_name}")
+
+            if files_added == 0:
+                raise HTTPException(status_code=404, detail="没有可用的附件文件")
+
+            # 读取ZIP文件内容
+            with open(temp_zip_path, "rb") as f:
+                zip_content = f.read()
+
+            # 生成文件名
+            safe_task_name = "".join(
+                c for c in task.task_name if c.isalnum() or c in (" ", "-", "_")
+            )[:50]
+            zip_filename = f"{safe_task_name}_attachments_{task_id}.zip"
+
+            # 返回文件
+            from fastapi.responses import Response
+
+            return Response(
+                content=zip_content,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{zip_filename}"',
+                },
+            )
+
+        finally:
+            # 清理临时文件
+            try:
+                if os.path.exists(temp_zip_path):
+                    os.remove(temp_zip_path)
+            except Exception as e:
+                logger.warning(f"清理临时ZIP文件失败: {e}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载任务附件失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"下载任务附件失败: {str(e)}")
+
+
 # SSE 连接管理器
 class TaskProgressManager:
     """任务进度SSE管理器"""

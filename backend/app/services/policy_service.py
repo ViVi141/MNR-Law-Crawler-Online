@@ -600,6 +600,7 @@ class PolicyService:
                     logger.info(
                         f"附件内容合并成功，合并了 {merge_result.get('merged_content_length', 0)} 字符的内容"
                     )
+                    # 注意：附件文件需要保留，以便用户可以下载，即使内容已合并到正文
                 else:
                     result["merge_errors"] = merge_result.get("errors", [])
                     logger.warning(

@@ -785,13 +785,58 @@ class TaskService:
                             f"关键词爬取模式：关键词={keywords}，无时间范围限制"
                         )
 
-                policies = crawler.search_all_policies(
-                    keywords=keywords if keywords else None,
-                    start_date=start_date,
-                    end_date=end_date,
-                    callback=progress_callback,
-                    limit_pages=config.get("limit_pages"),
-                )
+                # 执行爬取（使用try-except确保异常能被捕获）
+                policies = []
+                try:
+                    policies = crawler.search_all_policies(
+                        keywords=keywords if keywords else None,
+                        start_date=start_date,
+                        end_date=end_date,
+                        callback=progress_callback,
+                        limit_pages=config.get("limit_pages"),
+                    )
+                except Exception as crawl_error:
+                    # 捕获爬取过程中的异常，记录日志并更新任务状态
+                    logger.error(
+                        f"任务 {task_id} 爬取过程中发生异常: {crawl_error}",
+                        exc_info=True,
+                    )
+                    if progress_callback:
+                        progress_callback(
+                            f"[错误] 爬取过程中发生异常: {str(crawl_error)[:200]}"
+                        )
+
+                    # 立即更新任务状态为失败，确保状态同步
+                    try:
+                        task = db.query(Task).filter(Task.id == task_id).first()
+                        if task:
+                            task.status = "failed"
+                            # 清理错误消息中的敏感信息
+                            try:
+                                from .utils import sanitize_error_message
+
+                                task.error_message = sanitize_error_message(crawl_error)
+                            except ImportError:
+                                task.error_message = f"爬取失败: {type(crawl_error).__name__}: {str(crawl_error)[:500]}"
+                            task.end_time = datetime.now(timezone.utc)
+                            # 更新统计信息（如果有部分政策已获取）
+                            if len(policies) > 0:
+                                task.policy_count = len(policies)
+                                task.success_count = saved_count
+                                task.failed_count = failed_count + skipped_count
+                            db.commit()
+                            logger.info(f"任务 {task_id} 状态已更新为失败")
+                    except Exception as update_error:
+                        logger.error(f"更新任务状态失败: {update_error}", exc_info=True)
+                        db.rollback()
+
+                    # 清理爬虫实例引用
+                    with self._crawler_lock:
+                        if task_id in self._crawler_instances:
+                            del self._crawler_instances[task_id]
+
+                    # 重新抛出异常，让外层异常处理逻辑也能处理
+                    raise
 
                 # 保存政策到数据库
                 saved_count = 0

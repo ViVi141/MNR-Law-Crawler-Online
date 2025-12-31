@@ -247,6 +247,37 @@ def get_data_sources(
         import json
         from pathlib import Path
 
+        # 定义默认数据源列表
+        default_data_sources = [
+            {
+                "name": "政府信息公开平台",
+                "base_url": "https://gi.mnr.gov.cn/",
+                "search_api": "https://search.mnr.gov.cn/was5/web/search",
+                "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
+                "channel_id": "216640",
+                "enabled": True,
+            },
+            {
+                "name": "政策法规库",
+                "base_url": "https://f.mnr.gov.cn/",
+                "search_api": "https://search.mnr.gov.cn/was5/web/search",
+                "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
+                "channel_id": "174757",
+                "enabled": False,
+            },
+            {
+                "name": "广东省法规",
+                "type": "gd",
+                "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
+                "law_rule_types": [
+                    1,
+                    2,
+                    3,
+                ],  # 1=地方性法规, 2=政府规章, 3=规范性文件
+                "enabled": False,
+            },
+        ]
+
         # 从config.json读取数据源配置
         config_file = Path("config.json")
         if not config_file.exists():
@@ -255,54 +286,41 @@ def get_data_sources(
         if config_file.exists():
             with open(config_file, "r", encoding="utf-8") as f:
                 config_data = json.load(f)
-                data_sources = config_data.get("data_sources", [])
+                config_data_sources = config_data.get("data_sources", [])
 
-            # 确保包含广东省法规数据源（如果不存在则添加）
-            gd_source_exists = any(
-                ds.get("name") == "广东省法规" or ds.get("type") == "gd"
-                for ds in data_sources
-            )
-            if not gd_source_exists:
-                data_sources.append(
-                    {
-                        "name": "广东省法规",
-                        "type": "gd",
-                        "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
-                        "law_rule_types": [1, 2, 3],
-                        "enabled": False,
-                    }
-                )
+            # 合并配置文件和默认数据源
+            # 策略：以配置文件中的数据源为主，但确保所有默认数据源都存在
+            data_sources = []
+            config_source_names = {ds.get("name") for ds in config_data_sources}
+
+            # 首先添加配置文件中的数据源
+            for ds in config_data_sources:
+                # 对于广东省法规数据源，确保 law_rule_types 包含所有三种类型
+                if ds.get("type") == "gd" or ds.get("name") == "广东省法规":
+                    law_rule_types = ds.get("law_rule_types", [])
+                    # 确保包含所有三种类型：1=地方性法规, 2=政府规章, 3=规范性文件
+                    if not isinstance(law_rule_types, list):
+                        law_rule_types = [1, 2, 3]
+                    else:
+                        # 合并，确保包含所有类型
+                        all_types = {1, 2, 3}
+                        current_types = set(law_rule_types)
+                        if not all_types.issubset(current_types):
+                            # 补充缺失的类型
+                            law_rule_types = sorted(
+                                list(all_types.union(current_types))
+                            )
+                    ds["law_rule_types"] = law_rule_types
+                data_sources.append(ds)
+
+            # 然后添加默认数据源中不存在的数据源（按名称匹配）
+            for default_ds in default_data_sources:
+                default_name = default_ds.get("name")
+                if default_name not in config_source_names:
+                    data_sources.append(default_ds)
         else:
-            # 使用默认数据源（包含广东省法规）
-            data_sources = [
-                {
-                    "name": "政府信息公开平台",
-                    "base_url": "https://gi.mnr.gov.cn/",
-                    "search_api": "https://search.mnr.gov.cn/was5/web/search",
-                    "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
-                    "channel_id": "216640",
-                    "enabled": True,
-                },
-                {
-                    "name": "政策法规库",
-                    "base_url": "https://f.mnr.gov.cn/",
-                    "search_api": "https://search.mnr.gov.cn/was5/web/search",
-                    "ajax_api": "https://search.mnr.gov.cn/was/ajaxdata_jsonp.jsp",
-                    "channel_id": "174757",
-                    "enabled": False,
-                },
-                {
-                    "name": "广东省法规",
-                    "type": "gd",
-                    "api_base_url": "https://www.gdpc.gov.cn:443/bascdata",
-                    "law_rule_types": [
-                        1,
-                        2,
-                        3,
-                    ],  # 1=地方性法规, 2=政府规章, 3=规范性文件
-                    "enabled": False,
-                },
-            ]
+            # 使用默认数据源
+            data_sources = default_data_sources
 
         return {"data_sources": data_sources}
     except Exception as e:

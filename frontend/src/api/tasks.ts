@@ -67,5 +67,14 @@ export const tasksApi = {
       })
       .then((res) => res.data)
   },
+
+  // 下载任务附件（打包成zip）
+  downloadTaskAttachments(id: number): Promise<Blob> {
+    return apiClient
+      .get(`/api/tasks/${id}/download-attachments`, {
+        responseType: 'blob',
+      })
+      .then((res) => res.data)
+  },
 }
 

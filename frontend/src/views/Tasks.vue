@@ -82,6 +82,17 @@
               {{ downloading && downloadingTask?.id === row.id ? '下载中...' : '下载文件' }}
             </el-button>
             <el-button
+              v-if="row.status === 'completed' && row.task_type === 'crawl_task'"
+              link
+              type="primary"
+              :loading="downloadingAttachments && downloadingAttachmentsTask?.id === row.id"
+              :disabled="downloadingAttachments"
+              @click="handleDownloadTaskAttachments(row)"
+            >
+              <el-icon v-if="!downloadingAttachments || downloadingAttachmentsTask?.id !== row.id"><Download /></el-icon>
+              {{ downloadingAttachments && downloadingAttachmentsTask?.id === row.id ? '下载中...' : '下载附件' }}
+            </el-button>
+            <el-button
               v-if="row.status === 'running'"
               link
               type="warning"
@@ -892,6 +903,8 @@ const downloadFormatDialog = ref(false)
 const downloadFormat = ref<'all' | 'markdown' | 'docx'>('all')
 const downloadingTask = ref<Task | null>(null)
 const downloading = ref(false)
+const downloadingAttachmentsTask = ref<Task | null>(null)
+const downloadingAttachments = ref(false)
 
 const handleDownloadTaskFiles = async (task: Task) => {
   // 显示格式选择对话框
@@ -982,6 +995,59 @@ const confirmDownload = async () => {
   } finally {
     downloading.value = false
     downloadingTask.value = null
+  }
+}
+
+const handleDownloadTaskAttachments = async (task: Task) => {
+  if (!task) return
+
+  downloadingAttachmentsTask.value = task
+  downloadingAttachments.value = true
+
+  try {
+    // 调用下载API
+    const blob = await tasksApi.downloadTaskAttachments(task.id)
+
+    if (!blob || blob.size === 0) {
+      ElMessage.warning('下载的附件为空，可能没有可用的附件')
+      return
+    }
+
+    // 计算文件大小
+    const fileSizeMB = (blob.size / (1024 * 1024)).toFixed(2)
+    ElMessage.info({
+      message: `附件打包完成，大小: ${fileSizeMB} MB，开始下载...`,
+      duration: 3000,
+    })
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+
+    // 生成文件名
+    const timestamp = dayjs().format('YYYYMMDD_HHmmss')
+    const safeTaskName = task.task_name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')
+    link.download = `${safeTaskName}_attachments_${timestamp}.zip`
+
+    // 触发下载
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    // 延迟释放URL对象，确保下载开始
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+    }, 100)
+
+    ElMessage.success('附件下载成功')
+  } catch (error) {
+    const apiError = error as ApiError
+    const errorMessage = apiError.response?.data?.detail || apiError.message || '下载附件失败'
+    ElMessage.error(errorMessage)
+  } finally {
+    downloadingAttachments.value = false
+    downloadingAttachmentsTask.value = null
   }
 }
 

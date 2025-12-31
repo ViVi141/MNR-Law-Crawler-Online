@@ -4,7 +4,6 @@ import typescriptParser from '@typescript-eslint/parser'
 import vue from 'eslint-plugin-vue'
 import vueParser from 'vue-eslint-parser'
 import vueTsConfig from '@vue/eslint-config-typescript'
-
 export default [
   js.configs.recommended,
   ...vueTsConfig(),
