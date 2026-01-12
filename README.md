@@ -594,7 +594,7 @@ docker-compose build backend 2>&1 | tee backend-build.log
 
 ## 📄 许可证
 
-本项目采用 **MIT License** 开源许可证。
+本项目采用 **AGPL-3.0 license** 开源许可证。
 
 ## 👥 作者
 
